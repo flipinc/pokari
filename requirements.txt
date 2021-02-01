@@ -1,0 +1,11 @@
+sphinx
+pre-commit
+black
+mlflow
+hydra
+mypy
+omegaconf
+pytorch-lightning
+librosa
+soundfile
+flake8
