@@ -1,0 +1,16 @@
+{
+    "python.pythonPath": "/Users/26keisuke/opt/miniconda3/envs/double-t/bin/python",
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": ["--max-line-length", "88", "--ignore=E203,W503,W504"],
+    "python.linting.lintOnSave": true,
+    // pytorch is currently working on typing
+    "python.linting.mypyEnabled": false,
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": ["--line-length", "88"],
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": true
+    }
+}
