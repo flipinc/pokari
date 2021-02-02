@@ -60,10 +60,10 @@ class SpectrogramAugmentation(nn.Module):
         else:
             self.spec_augment = lambda x: x
 
-    def forward(self, input_spec):
-        augmented_spec = self.spec_cutout(input_spec)
-        augmented_spec = self.spec_augment(augmented_spec)
-        return augmented_spec
+    def forward(self, audio_signals):
+        audio_signals = self.spec_cutout(audio_signals)
+        audio_signals = self.spec_augment(audio_signals)
+        return audio_signals
 
 
 class SpecCutout(nn.Module):

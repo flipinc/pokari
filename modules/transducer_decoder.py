@@ -17,13 +17,13 @@ class TransducerDecoder(object):
         be used for decoding.
     """
 
-    def __init__(self, predictor, joint, vocabulary):
+    def __init__(self, predictor, joint, labels):
         super().__init__()
 
-        self.blank_id = len(vocabulary)
-        self.labels_map = dict([(i, vocabulary[i]) for i in range(len(vocabulary))])
+        self.blank_id = len(labels)
+        self.labels_map = dict([(i, labels[i]) for i in range(len(labels))])
 
-        self.decoding = GreedyInference(
+        self.infer = GreedyInference(
             predictor=predictor,
             joint=joint,
             blank_index=self.blank_id,
@@ -63,7 +63,7 @@ class TransducerDecoder(object):
         """
         # Compute hypotheses
         with torch.no_grad():
-            hypotheses_list, hidden = self.decoding(
+            hypotheses_list, hidden = self.infer(
                 encoder_output=encoder_output,
                 encoded_lengths=encoded_lengths,
                 hidden=hidden,
@@ -114,9 +114,20 @@ class TransducerDecoder(object):
             prediction = [p for p in prediction if p != self.blank_id]
 
             # De-tokenize the integer tokens
-            hypothesis = "".join(
-                [self.labels_map[c] for c in prediction if c != self.blank_id]
-            )
+            hypothesis = self.decode_tokens_to_str(prediction)
             hypotheses.append(hypothesis)
 
         return hypotheses
+
+    def decode_tokens_to_str(self, tokens: List[int]) -> str:
+        """
+        Implemented by subclass in order to decoder a token list into a string.
+
+        Args:
+            tokens: List of int representing the token ids.
+
+        Returns:
+            A decoded string.
+        """
+        hypothesis = "".join([self.labels_map[c] for c in tokens if c != self.blank_id])
+        return hypothesis

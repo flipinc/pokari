@@ -3,8 +3,6 @@
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": false,
     "python.linting.flake8Enabled": true,
-    // make it compatible with black
-    // "python.linting.flake8Args": ["--max-line-length", "88", "--ignore=E203"],
     "python.linting.lintOnSave": true,
     // pytorch is currently working on adding `mypy` typing
     "python.linting.mypyEnabled": false,

@@ -1,12 +1,6 @@
 import torch
 import torch.nn as nn
-
-
-# temporary class
-class warprnnt(nn.Module):
-    @staticmethod
-    def RNNTLoss(self, blank, reduction):
-        return 1
+import warprnnt_pytorch as warprnnt
 
 
 class TransducerLoss(nn.modules.loss._Loss):

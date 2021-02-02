@@ -1,3 +1,4 @@
+import logging
 import math
 import warnings
 
@@ -101,3 +102,36 @@ class CosineAnnealing(WarmupPolicy):
             for initial_lr in self.base_lrs
         ]
         return new_lrs
+
+
+def compute_max_steps(
+    max_epochs,
+    accumulate_grad_batches,
+    limit_train_batches,
+    num_workers,
+    num_samples,
+    batch_size,
+    drop_last,
+):
+    _round = math.floor if drop_last else math.ceil
+
+    sampler_num_samples = math.ceil(num_samples / num_workers)
+
+    if drop_last and num_workers > 1:
+        logging.warning(
+            "Please note that drop_last is broken in pytorch 1.6.0. "
+            "We will fix when pytorch 1.7.0 is released"
+        )
+        # TODO: Master verion, not in pytorch 1.6.0
+        # sampler_num_samples = math.ceil((num_samples - num_workers)/ num_workers)
+
+    steps_per_epoch = _round(sampler_num_samples / batch_size)
+    if isinstance(limit_train_batches, int) or limit_train_batches == 0.0:
+        steps_per_epoch = min(steps_per_epoch, int(limit_train_batches))
+    elif steps_per_epoch != float("inf"):
+        # limit_train_batches is a percentage of batches per epoch
+        steps_per_epoch = int(steps_per_epoch * limit_train_batches)
+        if accumulate_grad_batches == 1:
+            steps_per_epoch = max(steps_per_epoch, 1)
+
+    return math.ceil(steps_per_epoch / accumulate_grad_batches) * max_epochs

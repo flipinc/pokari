@@ -9,3 +9,7 @@ pytorch-lightning
 librosa
 soundfile
 flake8
+unidecode
+frozendict
+torch-stft
+pytest

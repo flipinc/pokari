@@ -1,5 +1,8 @@
 # python related
 __pycache__
 
+# pytest related
+.pytest_cache
+
 # hydra related
 outputs

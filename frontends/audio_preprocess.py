@@ -275,13 +275,14 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
 
     @torch.no_grad()
     def forward(self, audio_signals, audio_lens):
-        seq_len = self.get_seq_len(audio_lens.float())
+        x = audio_signals
+        del audio_signals
+
+        audio_lens = self.get_seq_len(audio_lens.float())
 
         if self.stft_exact_pad and not self.stft_conv:
             p = (self.n_fft - self.hop_length) // 2
-            x = torch.nn.functional.pad(
-                audio_signals.unsqueeze(1), (p, p), "reflect"
-            ).squeeze(1)
+            x = torch.nn.functional.pad(x.unsqueeze(1), (p, p), "reflect").squeeze(1)
 
         # dither
         if self.dither > 0:
@@ -319,13 +320,13 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
 
         # normalize if required
         if self.normalize:
-            x = normalize_batch(x, seq_len, normalize_type=self.normalize)
+            x = normalize_batch(x, audio_lens, normalize_type=self.normalize)
 
-        # mask to zero any values beyond seq_len in batch, pad to multiple of
+        # mask to zero any values beyond audio_lens in batch, pad to multiple of
         # `pad_to` (for efficiency)
         max_len = x.size(-1)
         mask = torch.arange(max_len).to(x.device)
-        mask = mask.expand(x.size(0), max_len) >= seq_len.unsqueeze(1)
+        mask = mask.expand(x.size(0), max_len) >= audio_lens.unsqueeze(1)
         x = x.masked_fill(
             mask.unsqueeze(1).type(torch.bool).to(device=x.device), self.pad_value
         )
@@ -340,4 +341,4 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
             if pad_amt != 0:
                 x = nn.functional.pad(x, (0, pad_to - pad_amt), value=self.pad_value)
 
-        return x, seq_len
+        return x, audio_lens

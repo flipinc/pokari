@@ -2,7 +2,7 @@ import logging
 import re
 
 import inflect
-import unidecode
+from unidecode import unidecode
 
 NUM_CHECK = re.compile(r"([$]?)(^|\s)(\S*[0-9]\S*)(?=(\s|$)((\S*)(\s|$))?)")
 

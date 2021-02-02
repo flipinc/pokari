@@ -157,7 +157,7 @@ class GreedyInference(nn.Module):
             packed list containing batch number of sentences (Hypotheses).
         """
         # Preserve decoder and joint training state
-        decoder_training_state = self.decoder.training
+        predictor_training_state = self.predictor.training
         joint_training_state = self.joint.training
 
         with torch.no_grad():
@@ -165,10 +165,10 @@ class GreedyInference(nn.Module):
             encoder_output = encoder_output.transpose(1, 2)  # (B, T, D)
             logitlen = encoded_lengths
 
-            self.decoder.eval()
+            self.predictor.eval()
             self.joint.eval()
 
-            with self.decoder.as_frozen(), self.joint.as_frozen():
+            with self.predictor.as_frozen(), self.joint.as_frozen():
                 if streaming:
                     hypotheses = []
                     for batch_idx in range(encoder_output.size(0)):
@@ -192,7 +192,7 @@ class GreedyInference(nn.Module):
 
             del hypotheses
 
-        self.decoder.train(decoder_training_state)
+        self.predictor.train(predictor_training_state)
         self.joint.train(joint_training_state)
 
         return (packed_result,), hidden

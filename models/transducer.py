@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 import os
 import tempfile
@@ -12,7 +13,8 @@ from hydra.utils import instantiate
 from losses.transducer import TransducerLoss
 from metrics.wer import TransducerWER
 from modules.transducer_decoder import TransducerDecoder
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+from optimizers.lr_scheduler import compute_max_steps
 
 
 class Transducer(pl.LightningModule):
@@ -44,47 +46,63 @@ class Transducer(pl.LightningModule):
             predictor=self.predictor, joint=self.joint, labels=self.labels
         )
         self.wer = TransducerWER(
-            decoding=self.decoding,
+            decoder=self.decoder,
             batch_dim_index=0,
             use_cer=False,
             log_prediction=True,
             dist_sync_on_step=True,
         )
 
+        optim_cfg = OmegaConf.to_container(cfg.optimizer, resolve=True)
+
         self.lr_scheduler_config = (
-            cfg.optimizer.pop("lr_scheduler")
-            if "lr_scheduler" in cfg.optimizer
-            else None
+            optim_cfg.pop("lr_scheduler") if "lr_scheduler" in optim_cfg else None
         )
 
         self.variatinoal_noise_config = (
-            cfg.optimizer.pop("variational_noise")
-            if "variational_noise" in cfg.optimizer
+            optim_cfg.pop("variational_noise")
+            if "variational_noise" in optim_cfg
             else None
         )
 
-        optimizer = cfg.optimizer.pop("name")
+        optimizer = optim_cfg.pop("name")
         if optimizer == "adam":
-            self.optimizer = torch.optim.Adam(self.parameters(), **cfg.optimizer)
+            self.optimizer = torch.optim.Adam(self.parameters(), **optim_cfg)
         else:
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
-    def setup(self, stage):
-        if stage == "fit":
-            total_devices = self.hparams.n_gpus * self.hparams.n_nodes
-            train_batches = len(self.train_dataloader()) // total_devices
-            self.total_train_steps = (
-                self.hparams.epochs * train_batches
-            ) // self.hparams.accumulate_grad_batches
-
     def configure_optimizers(self):
+        if self.trainer.distributed_backend is None:
+            num_workers = self.trainer.num_gpus or 1
+        elif self.trainer.distributed_backend == "ddp_cpu":
+            num_workers = self.trainer.num_processes * self.trainer.num_nodes
+        elif self.trainer.distributed_backend == "ddp":
+            num_workers = self.trainer.num_gpus * self.trainer.num_nodes
+        else:
+            logging.warning(
+                "The lightning trainer received accelerator: "
+                f"{self.trainer.distributed_backend}. We recommend to "
+                "use 'ddp' instead."
+            )
+            num_workers = self.trainer.num_gpus * self.trainer.num_nodes
+
+        max_steps = compute_max_steps(
+            max_epochs=self.trainer.max_epochs,
+            accumulate_grad_batches=self.trainer.accumulate_grad_batches,
+            limit_train_batches=self.trainer.limit_train_batches,
+            num_workers=num_workers,
+            num_samples=len(self.train_dl.dataset),
+            batch_size=self.train_dl.batch_size,
+            drop_last=self.train_dl.drop_last,
+        )
+
         if self.lr_scheduler_config:
             warmup_ratio = self.lr_scheduler_config.pop("warmup_ratio")
-            self.warmup_steps = self.total_train_steps * warmup_ratio
+            self.warmup_steps = max_steps * warmup_ratio
             self.lr_scheduler = instantiate(
                 self.lr_scheduler_config,
                 self.optimizer,
-                max_steps=self.total_train_steps,
+                max_steps=max_steps,
                 warmup_steps=self.warmup_steps,
             )
             return (
@@ -232,7 +250,7 @@ class Transducer(pl.LightningModule):
         return hypotheses
 
     def setup_dataloader_from_config(self, cfg: DictConfig):
-        augmentor = get_augmentations(cfg["augmentor"])
+        augmentor = get_augmentations(cfg["augmentor"]) if "augmentor" in cfg else None
         dataset = AudioToCharDataset(
             manifest_filepath=cfg["manifest_filepath"],
             labels=self.labels,
@@ -268,7 +286,7 @@ class Transducer(pl.LightningModule):
         )
 
         if self.training:
-            audio_signals = self.spec_augmentation(audio_signals=audio_signals)
+            audio_signals = self.spec_augmentat(audio_signals=audio_signals)
 
         encoded_signals, encoded_lens = self.encoder(
             audio_signals=audio_signals, audio_lens=audio_lens
@@ -280,7 +298,7 @@ class Transducer(pl.LightningModule):
         audio_signals, audio_lens, transcripts, transcript_lens = batch
 
         encoded_signals, encoded_lens = self.forward(
-            audio_signal=audio_signals, audio_lens=audio_lens
+            audio_signals=audio_signals, audio_lens=audio_lens
         )
         del audio_signals, audio_lens
 
@@ -289,7 +307,7 @@ class Transducer(pl.LightningModule):
         )
 
         joint_outputs = self.joint(
-            encoder_outputs=encoded_signals, predictor_ouputs=decoded_targets
+            encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
         )
         loss_value = self.loss(
             log_probs=joint_outputs,
@@ -300,10 +318,10 @@ class Transducer(pl.LightningModule):
 
         tensorboard_logs = {
             "train_loss": loss_value,
-            "learning_rate": self._optimizer.param_groups[0]["lr"],
+            "learning_rate": self.optimizer.param_groups[0]["lr"],
         }
 
-        if (self._trainer.global_step + 1) % self._trainer.log_every_n_steps == 0:
+        if (self.trainer.global_step + 1) % self.trainer.log_every_n_steps == 0:
             self.wer.update(encoded_signals, encoded_lens, transcripts, transcript_lens)
             _, scores, words = self.wer.compute()
             tensorboard_logs.update({"training_batch_wer": scores.float() / words})
@@ -322,16 +340,17 @@ class Transducer(pl.LightningModule):
 
         tensorboard_logs = {}
 
-        decoded_transcripts, decoded_lens = self.decoder(
-            transcripts=transcripts, transcript_lens=transcript_lens
+        decoded_targets, decoded_lens = self.predictor(
+            targets=transcripts, target_lens=transcript_lens
         )
+
         joint_outputs = self.joint(
-            encoded_signals=encoded_signals, decoded_transcripts=decoded_transcripts
+            encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
         )
 
         loss_value = self.loss(
             log_probs=joint_outputs,
-            transcripts=transcripts,
+            targets=transcripts,
             encoded_lens=encoded_lens,
             decoded_lens=decoded_lens,
         )
@@ -373,7 +392,7 @@ class Transducer(pl.LightningModule):
             )
 
             if std > 0 and self.global_step >= start_step:
-                for param_name, param in self.decoder.named_parameters():
+                for param_name, param in self.predictor.named_parameters():
                     if param.grad is not None:
                         noise = torch.normal(
                             mean=mean,

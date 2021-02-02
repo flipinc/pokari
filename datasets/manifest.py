@@ -5,6 +5,7 @@ import os
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
 from frontends.text_parser import CharParser
+from hydra.utils import to_absolute_path
 
 
 class ManifestCollector(collections.UserList):
@@ -109,17 +110,6 @@ class ManifestCollector(collections.UserList):
             else:
                 data.sort(key=lambda entity: entity.duration)
 
-        print(
-            "Dataset loaded with %d files totalling %.2f hours",
-            len(data),
-            total_duration / 3600,
-        )
-        print(
-            "%d files were filtered totalling %.2f hours",
-            num_filtered,
-            duration_filtered / 3600,
-        )
-
         super().__init__(data)
 
     def item_iter(
@@ -159,7 +149,7 @@ class ManifestCollector(collections.UserList):
 
         k = -1
         for manifest_file in manifests_files:
-            with open(os.path.expanduser(manifest_file), "r") as f:
+            with open(to_absolute_path(os.path.expanduser(manifest_file)), "r") as f:
                 for line in f:
                     k += 1
                     item = parse_func(line, manifest_file)
@@ -180,7 +170,7 @@ class ManifestCollector(collections.UserList):
                 f"Manifest file {manifest_file} has invalid json line structure: "
                 f"{line} without proper audio file key."
             )
-        item["audio_file"] = os.path.expanduser(item["audio_file"])
+        item["audio_file"] = to_absolute_path(os.path.expanduser(item["audio_file"]))
 
         # Duration.
         if "duration" not in item:
