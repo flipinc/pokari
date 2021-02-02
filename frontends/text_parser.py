@@ -1,7 +1,7 @@
 import string
 from typing import List, Optional
 
-import frozendict
+from frozendict import frozendict
 
 from frontends.text_cleaner import clean_text
 
@@ -132,7 +132,9 @@ class ENCharParser(CharParser):
 
 
 def make_parser(
-    labels: Optional[List[str]] = None, name: str = "base", **kwargs,
+    labels: Optional[List[str]] = None,
+    name: str = "base",
+    **kwargs,
 ) -> CharParser:
     """Creates parser from labels, set of arguments and concise parser name.
 

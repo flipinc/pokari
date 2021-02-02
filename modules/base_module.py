@@ -1,4 +1,5 @@
-import contextmanager
+from contextlib import contextmanager
+
 import torch.nn as nn
 
 

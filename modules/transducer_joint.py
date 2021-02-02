@@ -16,34 +16,43 @@ class TransducerJoint(BaseModule):
 
     def __init__(
         self,
-        enc_hidden: int,
-        pred_hidden: int,
-        joint_hidden: int,
+        encoder_hidden: int,
+        predictor_hidden: int,
+        dim_model: int,
         vocab_size: int,
+        activation: str,
     ):
         super().__init__()
 
         self._vocab_size = vocab_size
         self._num_classes = vocab_size + 1  # add 1 for blank symbol
 
-        self.linear_predictor = torch.nn.Linear(pred_hidden, joint_hidden)
-        self.linea_encoder = torch.nn.Linear(enc_hidden, joint_hidden)
-        self.joint = torch.nn.Sequential(
-            [torch.nn.ReLU(inplace=True)]
-            + [torch.nn.Linear(joint_hidden, self._num_classes)]
-        )
+        self.linear_encoder = torch.nn.Linear(encoder_hidden, dim_model)
+        self.linear_predictor = torch.nn.Linear(predictor_hidden, dim_model)
+
+        activation = activation.lower()
+
+        if activation == "relu":
+            activation = torch.nn.ReLU(inplace=True)
+        elif activation == "sigmoid":
+            activation = torch.nn.Sigmoid()
+        elif activation == "tanh":
+            activation = torch.nn.Tanh()
+
+        layers = [activation] + [torch.nn.Linear(dim_model, self._num_classes)]
+        self.joint_net = torch.nn.Sequential(*layers)
 
     def forward(
         self,
         encoder_outputs: torch.Tensor,
-        decoder_outputs: Optional[torch.Tensor],
+        predictor_outputs: Optional[torch.Tensor],
     ) -> Union[torch.Tensor, List[Optional[torch.Tensor]]]:
         # encoder = (B, D, T)
         # decoder = (B, D, U)
         encoder_outputs = encoder_outputs.transpose(1, 2)  # (B, T, D)
-        decoder_outputs = decoder_outputs.transpose(1, 2)  # (B, U, D)
+        predictor_outputs = predictor_outputs.transpose(1, 2)  # (B, U, D)
 
-        out = self.joint(encoder_outputs, decoder_outputs)  # [B, T, U, V + 1]
+        out = self.joint(encoder_outputs, predictor_outputs)  # [B, T, U, V + 1]
         return out
 
     def joint(self, f: torch.Tensor, g: torch.Tensor) -> torch.Tensor:

@@ -1,15 +1,17 @@
 trainer:
-  gpus: 0
+  gpus: -1
   max_epochs: 100
   num_nodes: 1
   accumulate_grad_batches: 1
   log_every_n_steps: 10
-  amp_level: O0 # O1/O2 for mixed precision (O1 is recommended)
-  precision: 32 # Should be set to 16 for O1 and O2 to enable the AMP.
+  amp_level: O1 # O1/O2 for mixed precision (O1 is recommended)
+  precision: 16 # Should be set to 16 for O1 and O2 to enable the AMP.
   gradient_clip_val: 1
   weights_summary: full
   resume_from_checkpoint: null
   distributed_backend: ddp
+  progress_bar_refresh_rate: 20 # for google colab
+  default_root_dir: ./drive/MyDrive/jynote/emformer # for google colab
 
 model:
   labels:
@@ -45,41 +47,36 @@ model:
     ]
 
   train_ds:
-    manifest_filepath: ???
+    manifest_filepath: ./drive/MyDrive/jynote/manifest_train.json # for google colab
     sample_rate: 16000
     batch_size: 4
     max_duration: null
     min_duration: null
     shuffle: true
-    num_workers: 1
+    num_workers: 4
     pin_memory: true
+    normalize_transcripts: true # text to lowercase
     augmentor:
       speed:
+        prob: 1.0
         sr: 16000
         resample_type: kaiser_fast
 
   validation_ds:
-    manifest_filepath: ???
+    manifest_filepath: ./drive/MyDrive/jynote/manifest_val.json # for google colab
     sample_rate: 16000
     batch_size: 4
     shuffle: false
-    num_workers: 8
+    num_workers: 4
     pin_memory: false
-
-  test_ds:
-    manifest_filepath: null
-    sample_rate: 16000
-    batch_size: 4
-    shuffle: false
-    num_workers: 8
-    pin_memory: false
+    normalize_transcripts: true
 
   preprocessor:
     _target_: frontends.audio_preprocess.AudioToMelSpectrogramPreprocessor
     sample_rate: 16000
     window_size: 0.02
     window_stride: 0.01
-    num_mels: &num_mels 80
+    n_mels: &n_mels 80
     preemph: 0.97
     dither: 1e-5
     pad_to: 16
@@ -95,14 +92,14 @@ model:
     rect_freq: 15
 
   encoder:
-    _traget_: modules.emformer_encoder.EmformerEncoder
-    subsampling: stack # frame stacking is paper
+    _target_: modules.emformer_encoder.EmformerEncoder
+    subsampling: vgg # frame stacking is paper
     subsampling_factor: 4
-    subsampling_dim: null # conv channels. used for vgg susampling
+    subsampling_dim: 256 # conv channels. used for vgg susampling
 
-    feat_in: *num_mels
+    feat_in: *n_mels
 
-    num_layers: 18 # 26 for medium latency, 18 for low latency in paper
+    num_layers: 16 # 26 for medium latency, 18 for low latency in paper
     num_heads: 8
     dim_model: 512
     dim_ffn: 2048
@@ -115,7 +112,7 @@ model:
   predictor:
     _target_: modules.transducer_predictor.TransducerPredictor
     num_layers: 1 # 2 in paper
-    emded_dim: 320 # 256 in paper
+    embed_dim: 320 # 256 in paper
     dim_model: 320 # 512 in paper
     random_state_sampling: true
 

@@ -121,9 +121,6 @@ class AudioToCharDataset(torch.utils.data.Dataset):
         return len(self.collection)
 
     def collate_fn(self, batch):
-        return self._speech_collate_fn(batch, pad_id=self.pad_id)
-
-    def _speech_collate_fn(self, batch, pad_id):
         """collate batch of audio sig, audio len, tokens, tokens len
         Args:
             batch (Optional[FloatTensor], Optional[LongTensor], LongTensor,
@@ -149,7 +146,7 @@ class AudioToCharDataset(torch.utils.data.Dataset):
             tokens_i_len = tokens_i_len.item()
             if tokens_i_len < max_tokens_len:
                 pad = (0, max_tokens_len - tokens_i_len)
-                tokens_i = torch.nn.functional.pad(tokens_i, pad, value=pad_id)
+                tokens_i = torch.nn.functional.pad(tokens_i, pad, value=self.pad_id)
             tokens.append(tokens_i)
 
         if has_audio:

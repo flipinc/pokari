@@ -167,7 +167,7 @@ class TransducerPredictor(BaseModule):
             else:
                 B = batch_size
 
-            y = torch.zeros((B, 1, self.pred_hidden), device=device, dtype=dtype)
+            y = torch.zeros((B, 1, self.dim_model), device=device, dtype=dtype)
 
         # Prepend blank "start of sequence" symbol (zero tensor)
         if add_sos:
@@ -210,14 +210,14 @@ class TransducerPredictor(BaseModule):
                 torch.randn(
                     self.num_layers,
                     batch,
-                    self.pred_hidden,
+                    self.dim_model,
                     dtype=y.dtype,
                     device=y.device,
                 ),
                 torch.randn(
                     self.num_layers,
                     batch,
-                    self.pred_hidden,
+                    self.dim_model,
                     dtype=y.dtype,
                     device=y.device,
                 ),
@@ -228,14 +228,14 @@ class TransducerPredictor(BaseModule):
                 torch.zeros(
                     self.num_layers,
                     batch,
-                    self.pred_hidden,
+                    self.dim_model,
                     dtype=y.dtype,
                     device=y.device,
                 ),
                 torch.zeros(
                     self.num_layers,
                     batch,
-                    self.pred_hidden,
+                    self.dim_model,
                     dtype=y.dtype,
                     device=y.device,
                 ),

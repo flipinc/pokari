@@ -12,6 +12,7 @@ class EmformerEncoder(nn.Module):
         self,
         subsampling,
         subsampling_factor,
+        subsampling_dim,
         feat_in,
         num_layers,
         num_heads,
@@ -40,7 +41,7 @@ class EmformerEncoder(nn.Module):
             subsampling_factor=self.subsampling_factor,
             feat_in=feat_out,
             feat_out=dim_model,
-            conv_channels=subsampling_factor,
+            conv_channels=subsampling_dim,
             activation=nn.ReLU(),
         )
 
