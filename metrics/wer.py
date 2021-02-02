@@ -3,7 +3,7 @@ from typing import Any, Optional, Union
 
 import editdistance
 import torch
-from modules.transducer_decoder import RNNTDecoding
+from modules.transducer_decoder import TransducerDecoder
 from pytorch_lightning.metrics import Metric
 
 
@@ -51,7 +51,7 @@ def dim_zero_mean(x):
     return torch.mean(x, dim=0)
 
 
-class RNNTWER(Metric):
+class TransducerWER(Metric):
     """
     This metric computes numerator and denominator for Overall Word Error Rate (WER)
     between prediction and reference texts. When doing distributed training/evaluation
@@ -98,21 +98,19 @@ class RNNTWER(Metric):
 
     def __init__(
         self,
-        decoding: RNNTDecoding,
+        decoder: TransducerDecoder,
         batch_dim_index=0,
         use_cer=False,
         log_prediction=True,
         dist_sync_on_step=False,
     ):
-        super(RNNTWER, self).__init__(
-            dist_sync_on_step=dist_sync_on_step, compute_on_step=False
-        )
-        self.decoding = decoding
+        super().__init__(dist_sync_on_step=dist_sync_on_step, compute_on_step=False)
+        self.decoder = decoder
         self.batch_dim_index = batch_dim_index
         self.use_cer = use_cer
         self.log_prediction = log_prediction
-        self.blank_id = self.decoding.blank_id
-        self.labels_map = self.decoding.labels_map
+        self.blank_id = self.decoder.blank_id
+        self.labels_map = self.decoder.labels_map
 
         self.add_state(
             "scores", default=torch.tensor(0), dist_reduce_fx="sum", persistent=False
@@ -141,10 +139,10 @@ class RNNTWER(Metric):
                 tgt_len = tgt_lenths_cpu_tensor[ind].item()
                 target = targets_cpu_tensor[ind][:tgt_len].numpy().tolist()
 
-                reference = self.decoding.decode_tokens_to_str(target)
+                reference = self.decoder.decode_tokens_to_str(target)
                 references.append(reference)
 
-            hypotheses, _ = self.decoding.rnnt_decoder_predictions_tensor(
+            hypotheses, _ = self.decoder.generate_hypotheses(
                 encoder_output, encoded_lengths
             )
 

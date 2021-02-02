@@ -1,4 +1,3 @@
-import logging
 import math
 
 import librosa
@@ -14,33 +13,47 @@ from frontends.audio_augment import AudioAugmentor
 from frontends.audio_segment import AudioSegment
 
 
-def splice_frames(x, frame_splicing):
-    """ Stacks frames together across feature dim
-
-    input is batch_size, feature_dim, num_frames
-    output is batch_size, feature_dim*frame_splicing, num_frames
-
-    """
-    seq = [x]
-    for n in range(1, frame_splicing):
-        seq.append(torch.cat([x[:, :, :n], x[:, :, n:]], dim=2))
-    return torch.cat(seq, dim=1)
-
-
 def normalize_batch(x, seq_len, normalize_type):
-    x_mean = torch.zeros((seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device)
-    x_std = torch.zeros((seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device)
-    for i in range(x.shape[0]):
-        if x[i, :, : seq_len[i]].shape[1] == 1:
-            raise ValueError(
-                "normalize_batch with `per_feature` normalize_type received a tensor of"
-                "length 1. This will result in torch.std() returning nan"
-            )
-        x_mean[i, :] = x[i, :, : seq_len[i]].mean(dim=1)
-        x_std[i, :] = x[i, :, : seq_len[i]].std(dim=1)
-    # make sure x_std is not zero
-    x_std += 1e-6
-    return (x - x_mean.unsqueeze(2)) / x_std.unsqueeze(2)
+    """Normalize audio signal"""
+
+    CONSTANT = 1e-6
+
+    if normalize_type == "per_feature":
+        x_mean = torch.zeros(
+            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+        )
+        x_std = torch.zeros(
+            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+        )
+        for i in range(x.shape[0]):
+            if x[i, :, : seq_len[i]].shape[1] == 1:
+                raise ValueError(
+                    "normalize_batch with `per_feature` normalize_type "
+                    "received a tensor of length 1. This will result in "
+                    "torch.std() returning nan"
+                )
+            x_mean[i, :] = x[i, :, : seq_len[i]].mean(dim=1)
+            x_std[i, :] = x[i, :, : seq_len[i]].std(dim=1)
+        # make sure x_std is not zero
+        x_std += CONSTANT
+        return (x - x_mean.unsqueeze(2)) / x_std.unsqueeze(2)
+    elif normalize_type == "all_features":
+        x_mean = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
+        x_std = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
+        for i in range(x.shape[0]):
+            x_mean[i] = x[i, :, : seq_len[i]].mean()
+            x_std[i] = x[i, :, : seq_len[i]].std()
+        # make sure x_std is not zero
+        x_std += CONSTANT
+        return (x - x_mean.view(-1, 1, 1)) / x_std.view(-1, 1, 1)
+    elif "fixed_mean" in normalize_type and "fixed_std" in normalize_type:
+        x_mean = torch.tensor(normalize_type["fixed_mean"], device=x.device)
+        x_std = torch.tensor(normalize_type["fixed_std"], device=x.device)
+        return (x - x_mean.view(x.shape[0], x.shape[1]).unsqueeze(2)) / x_std.view(
+            x.shape[0], x.shape[1]
+        ).unsqueeze(2)
+    else:
+        return x
 
 
 class STFTPatch(STFT):
@@ -49,7 +62,7 @@ class STFTPatch(STFT):
 
 
 class STFTExactPad(STFTPatch):
-    """adapted from Prem Seetharaman's https://github.com/pseeth/pytorch-stft"""
+    """Adapted from Prem Seetharaman's https://github.com/pseeth/pytorch-stft"""
 
     def __init__(self, *params, **kw_params):
         super().__init__(*params, **kw_params)
@@ -123,9 +136,7 @@ class WaveformFeaturizer(object):
 
 
 class AudioToMelSpectrogramPreprocessor(nn.Module):
-    """Featurizer that converts wavs to Mel Spectrograms.
-    See AudioToMelSpectrogramPreprocessor for args.
-    """
+    """Featurizer that converts wavs to Mel Spectrograms."""
 
     def __init__(
         self,
@@ -136,7 +147,7 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         normalize="per_feature",
         n_fft=None,
         preemph=0.97,
-        nfilt=80,
+        n_mels=80,
         lowfreq=0,
         highfreq=None,
         log=True,
@@ -145,7 +156,6 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         dither=1e-5,
         pad_to=16,
         max_duration=16.7,
-        frame_splicing=1,
         stft_exact_pad=False,
         stft_conv=False,
         pad_value=0,
@@ -161,26 +171,23 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         ):
             raise ValueError(
                 f"{self} got an invalid value for either window_size or "
-                f"window_stride. Both must be positive ints."
+                "window_stride. Both must be positive ints."
             )
-        logging.info(f"PADDING: {pad_to}")
 
         if window_size:
-            n_window_size = int(window_size * sample_rate)
+            num_window_size = int(window_size * sample_rate)
         if window_stride:
-            n_window_stride = int(window_stride * sample_rate)
+            num_window_stride = int(window_stride * sample_rate)
 
         self.sample_rate = sample_rate
-        self.win_length = n_window_size
-        self.hop_length = n_window_stride
+        self.win_length = num_window_size
+        self.hop_length = num_window_stride
         self.n_fft = n_fft or 2 ** math.ceil(math.log2(self.win_length))
         self.stft_exact_pad = stft_exact_pad
         self.stft_conv = stft_conv
 
         if stft_conv:
-            logging.info("STFT using conv")
             if stft_exact_pad:
-                logging.info("STFT using exact pad")
                 self.stft = STFTExactPad(
                     self.n_fft, self.hop_length, self.win_length, window
                 )
@@ -189,7 +196,6 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
                     self.n_fft, self.hop_length, self.win_length, window
                 )
         else:
-            logging.info("STFT using torch")
             torch_windows = {
                 "hann": torch.hann_window,
                 "hamming": torch.hamming_window,
@@ -215,15 +221,14 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         self.normalize = normalize
         self.log = log
         self.dither = dither
-        self.frame_splicing = frame_splicing
-        self.nfilt = nfilt
+        self.n_mels = n_mels
         self.preemph = preemph
         self.pad_to = pad_to
         highfreq = highfreq or sample_rate / 2
 
         filterbanks = torch.tensor(
             librosa.filters.mel(
-                sample_rate, self.n_fft, n_mels=nfilt, fmin=lowfreq, fmax=highfreq
+                sample_rate, self.n_fft, n_mels=n_mels, fmin=lowfreq, fmax=highfreq
             ),
             dtype=torch.float,
         ).unsqueeze(0)
@@ -249,13 +254,6 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         # log_zero_guard_value is the the small we want to use, we support
         # an actual number, or "tiny", or "eps"
         self.log_zero_guard_type = log_zero_guard_type
-        logging.debug(f"sr: {sample_rate}")
-        logging.debug(f"n_fft: {self.n_fft}")
-        logging.debug(f"win_length: {self.win_length}")
-        logging.debug(f"hop_length: {self.hop_length}")
-        logging.debug(f"n_mels: {nfilt}")
-        logging.debug(f"fmin: {lowfreq}")
-        logging.debug(f"fmax: {highfreq}")
 
     def log_zero_guard_value_fn(self, x):
         if isinstance(self.log_zero_guard_value, str):
@@ -266,8 +264,8 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
             else:
                 raise ValueError(
                     f"{self} received {self.log_zero_guard_value} for the "
-                    f"log_zero_guard_type parameter. It must be either a "
-                    f"number, 'tiny', or 'eps'"
+                    "log_zero_guard_type parameter. It must be either a "
+                    "number, 'tiny', or 'eps'"
                 )
         else:
             return self.log_zero_guard_value
@@ -276,18 +274,20 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         return torch.ceil(seq_len / self.hop_length).to(dtype=torch.long)
 
     @torch.no_grad()
-    def forward(self, x, seq_len):
-        seq_len = self.get_seq_len(seq_len.float())
+    def forward(self, audio_signals, audio_lens):
+        seq_len = self.get_seq_len(audio_lens.float())
 
         if self.stft_exact_pad and not self.stft_conv:
             p = (self.n_fft - self.hop_length) // 2
-            x = torch.nn.functional.pad(x.unsqueeze(1), (p, p), "reflect").squeeze(1)
+            x = torch.nn.functional.pad(
+                audio_signals.unsqueeze(1), (p, p), "reflect"
+            ).squeeze(1)
 
         # dither
         if self.dither > 0:
             x += self.dither * torch.randn_like(x)
 
-        # do preemphasis
+        # preemphasis
         if self.preemph is not None:
             x = torch.cat(
                 (x[:, 0].unsqueeze(1), x[:, 1:] - self.preemph * x[:, :-1]), dim=1
@@ -316,10 +316,6 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
                 x = torch.log(torch.clamp(x, min=self.log_zero_guard_value_fn(x)))
             else:
                 raise ValueError("log_zero_guard_type was not understood")
-
-        # frame splicing if required
-        if self.frame_splicing > 1:
-            x = splice_frames(x, self.frame_splicing)
 
         # normalize if required
         if self.normalize:

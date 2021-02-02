@@ -1,11 +1,11 @@
 from typing import List, Optional, Union
 
-import contextmanager
 import torch
-import torch.nn as nn
+
+from modules.base_module import BaseModule
 
 
-class RNNTJoint(nn.Module):
+class TransducerJoint(BaseModule):
     """A Recurrent Neural Network Transducer Joint Network (RNN-T Joint Network).
     An RNN-T Joint network, comprised of a feedforward model.
 
@@ -15,30 +15,28 @@ class RNNTJoint(nn.Module):
     """
 
     def __init__(
-        self, enc_hidden: int, pred_hidden: int, joint_hidden: int, num_classes: int,
+        self,
+        enc_hidden: int,
+        pred_hidden: int,
+        joint_hidden: int,
+        vocab_size: int,
     ):
         super().__init__()
 
-        self._vocab_size = num_classes
-        self._num_classes = num_classes + 1  # add 1 for blank symbol
+        self._vocab_size = vocab_size
+        self._num_classes = vocab_size + 1  # add 1 for blank symbol
 
-        self._loss = None
-        self._wer = None
-
-        # Required arguments
-        self.enc_hidden = enc_hidden
-        self.pred_hidden = pred_hidden
-        self.joint_hidden = joint_hidden
-
-        self.pred, self.enc, self.joint_net = self._joint_net(
-            num_classes=self._num_classes,  # add 1 for blank symbol
-            pred_n_hidden=self.pred_hidden,
-            enc_n_hidden=self.enc_hidden,
-            joint_n_hidden=self.joint_hidden,
+        self.linear_predictor = torch.nn.Linear(pred_hidden, joint_hidden)
+        self.linea_encoder = torch.nn.Linear(enc_hidden, joint_hidden)
+        self.joint = torch.nn.Sequential(
+            [torch.nn.ReLU(inplace=True)]
+            + [torch.nn.Linear(joint_hidden, self._num_classes)]
         )
 
     def forward(
-        self, encoder_outputs: torch.Tensor, decoder_outputs: Optional[torch.Tensor],
+        self,
+        encoder_outputs: torch.Tensor,
+        decoder_outputs: Optional[torch.Tensor],
     ) -> Union[torch.Tensor, List[Optional[torch.Tensor]]]:
         # encoder = (B, D, T)
         # decoder = (B, D, U)
@@ -86,11 +84,11 @@ class RNNTJoint(nn.Module):
             Logits / log softmaxed tensor of shape (B, T, U, V + 1).
         """
         # f = [B, T, H1]
-        f = self.enc(f)
+        f = self.linear_encoder(f)
         f.unsqueeze_(dim=2)  # (B, T, 1, H)
 
         # g = [B, U, H2]
-        g = self.pred(g)
+        g = self.linear_predictor(g)
         g.unsqueeze_(dim=1)  # (B, 1, U, H)
 
         inp = f + g  # [B, T, U, H]
@@ -105,55 +103,3 @@ class RNNTJoint(nn.Module):
             res = res.log_softmax(dim=-1)
 
         return res
-
-    def _joint_net(self, num_classes, pred_n_hidden, enc_n_hidden, joint_n_hidden):
-        """
-        Prepare the trainable modules of the Joint Network
-
-        Args:
-            num_classes: Number of output classes (vocab size) excluding
-                the RNNT blank token.
-            pred_n_hidden: Hidden size of the prediction network.
-            enc_n_hidden: Hidden size of the encoder network.
-            joint_n_hidden: Hidden size of the joint network.
-            activation: Activation of the joint. Can be one of [relu, tanh, sigmoid]
-            dropout: Dropout value to apply to joint.
-        """
-        pred = torch.nn.Linear(pred_n_hidden, joint_n_hidden)
-        enc = torch.nn.Linear(enc_n_hidden, joint_n_hidden)
-
-        activation = torch.nn.ReLU(inplace=True)
-
-        layers = [activation] + [torch.nn.Linear(joint_n_hidden, num_classes)]
-        return pred, enc, torch.nn.Sequential(*layers)
-
-    def freeze(self) -> None:
-        r"""
-        Freeze all params for inference.
-        """
-        for param in self.parameters():
-            param.requires_grad = False
-
-        self.eval()
-
-    def unfreeze(self) -> None:
-        """
-        Unfreeze all parameters for training.
-        """
-        for param in self.parameters():
-            param.requires_grad = True
-
-        self.train()
-
-    @contextmanager
-    def as_frozen(self):
-        """
-        Context manager which temporarily freezes a module, yields control and finally
-        unfreezes the module.
-        """
-        self.freeze()
-
-        try:
-            yield
-        finally:
-            self.unfreeze()

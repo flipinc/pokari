@@ -2,24 +2,7 @@ import random
 
 import librosa
 import numpy as np
-
-
-class AudioAugmentor(object):
-    def __init__(self, perturbations=None, rng=None):
-        self._rng = random.Random() if rng is None else rng
-        self._pipeline = perturbations if perturbations is not None else []
-
-    def perturb(self, segment):
-        for (prob, p) in self._pipeline:
-            if self._rng.random() < prob:
-                p.perturb(segment)
-        return
-
-    def max_augmentation_length(self, length):
-        newlen = length
-        for (prob, p) in self._pipeline:
-            newlen = p.max_augmentation_length(newlen)
-        return newlen
+from omegaconf import DictConfig, OmegaConf
 
 
 class SpeedPerturbation(object):
@@ -104,3 +87,56 @@ class SpeedPerturbation(object):
         data._samples = librosa.core.resample(
             data._samples, self._sr, new_sr, res_type=self._res_type
         )
+
+
+perturbation_types = {
+    "speed": SpeedPerturbation,
+}
+
+
+def get_augmentations(augmentor: DictConfig):
+    augmentor = OmegaConf.to_container(augmentor, resolve=True)
+
+    augmentations = []
+    for augment_name, augment_kwargs in augmentor.items():
+        prob = augment_kwargs.get("prob", None)
+
+        if prob is None:
+            raise KeyError(
+                f'Augmentation "{augment_name}" will not be applied as '
+                f'keyword argument "prob" was not defined for this augmentation.'
+            )
+        elif prob < 0.0 or prob > 1.0:
+            raise ValueError("`prob` must be a float value between 0 and 1.")
+        else:
+            _ = augment_kwargs.pop("prob")
+
+            try:
+                augmentation = perturbation_types[augment_name](**augment_kwargs)
+                augmentations.append([prob, augmentation])
+            except KeyError:
+                raise KeyError(
+                    "Invalid perturbation name. Allowed values : "
+                    f"{perturbation_types.keys()}"
+                )
+
+    augmenter = AudioAugmentor(perturbations=augmentations)
+    return augmenter
+
+
+class AudioAugmentor(object):
+    def __init__(self, perturbations=None, rng=None):
+        self._rng = random.Random() if rng is None else rng
+        self._pipeline = perturbations if perturbations is not None else []
+
+    def perturb(self, segment):
+        for (prob, p) in self._pipeline:
+            if self._rng.random() < prob:
+                p.perturb(segment)
+        return
+
+    def max_augmentation_length(self, length):
+        newlen = length
+        for (prob, p) in self._pipeline:
+            newlen = p.max_augmentation_length(newlen)
+        return newlen

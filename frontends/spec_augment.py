@@ -36,13 +36,13 @@ class SpectrogramAugmentation(nn.Module):
 
     def __init__(
         self,
-        freq_masks=2,
-        time_masks=2,
-        freq_width=15,
-        time_width=25,
-        rect_masks=5,
-        rect_time=25,
-        rect_freq=15,
+        freq_masks=0,
+        time_masks=0,
+        freq_width=10,
+        time_width=10,
+        rect_masks=0,
+        rect_time=5,
+        rect_freq=20,
     ):
         super().__init__()
 
@@ -78,7 +78,7 @@ class SpecCutout(nn.Module):
     """
 
     def __init__(self, rect_masks=0, rect_time=5, rect_freq=20):
-        super(SpecCutout, self).__init__()
+        super().__init__()
 
         self._rng = random.Random()
 
@@ -122,7 +122,7 @@ class SpecAugment(nn.Module):
     """
 
     def __init__(self, freq_masks=0, time_masks=0, freq_width=10, time_width=10):
-        super(SpecAugment, self).__init__()
+        super().__init__()
 
         self._rng = random.Random()
 
@@ -143,8 +143,8 @@ class SpecAugment(nn.Module):
             self.adaptive_temporal_width = True
 
     @torch.no_grad()
-    def forward(self, x):
-        sh = x.shape
+    def forward(self, audio_signals):
+        sh = audio_signals.shape
 
         if self.adaptive_temporal_width:
             time_width = max(1, int(sh[2] * self.time_width))
@@ -157,13 +157,13 @@ class SpecAugment(nn.Module):
 
                 w = self._rng.randint(0, self.freq_width)
 
-                x[idx, x_left : x_left + w, :] = 0.0
+                audio_signals[idx, x_left : x_left + w, :] = 0.0
 
             for i in range(self.time_masks):
                 y_left = self._rng.randint(0, sh[2] - time_width)
 
                 w = self._rng.randint(0, time_width)
 
-                x[idx, :, y_left : y_left + w] = 0.0
+                audio_signals[idx, :, y_left : y_left + w] = 0.0
 
-        return x
+        return audio_signals
