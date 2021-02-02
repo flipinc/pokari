@@ -1,1 +1,5 @@
-.mypy_cache
+# python related
+__pycache__
+
+# hydra related
+outputs

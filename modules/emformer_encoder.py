@@ -9,30 +9,38 @@ from modules.subsample import VggSubsample
 
 class EmformerEncoder(nn.Module):
     def __init__(
-        self, cfg,
+        self,
+        subsampling,
+        subsampling_factor,
+        feat_in,
+        num_layers,
+        num_heads,
+        dim_model,
+        dim_ffn,
+        dropout_attn,
+        left_length,
+        chunk_length,
+        right_length,
     ):
         super().__init__()
 
-        self.subsampling = "vgg"
-        self.stack_length = cfg.stack_length
-        self.num_layers = cfg.num_layers
-        self.left_length = cfg.left_length
-        self.chunk_length = cfg.chunk_length
-        self.right_length = cfg.right_length
+        self.subsampling = subsampling
+        self.subsampling_factor = subsampling_factor
+        self.num_layers = num_layers
+        self.left_length = left_length
+        self.chunk_length = chunk_length
+        self.right_length = right_length
 
-        feat_in = cfg.feat_in
-        feat_out = cfg.feat_out
-        num_heads = cfg.num_heads
-        dim_model = cfg.dim_model
-        dim_ffn = cfg.dim_ffn
-        dropout_attn = cfg.dropout_attn
+        feat_out = int(dim_model / subsampling_factor)
+        if dim_model % subsampling_factor > 0:
+            raise ValueError("dim_model must be divisible by subsampling_factor.")
 
         self.linear = nn.Linear(feat_in, feat_out)
         self.subsample = VggSubsample(
-            subsampling_factor=self.stack_length,
+            subsampling_factor=self.subsampling_factor,
             feat_in=feat_out,
             feat_out=dim_model,
-            conv_channels=256,
+            conv_channels=subsampling_factor,
             activation=nn.ReLU(),
         )
 
@@ -76,7 +84,7 @@ class EmformerEncoder(nn.Module):
         right_indexes = []
         total_right_length = 0
         for i in range(num_chunks):
-            # 1. enable diagnal and left chunks
+            # 1. mark diagnal and left chunks
             left_index = (
                 self.chunk_length * i - self.left_length
                 if (self.chunk_length * i - self.left_length) >= 0
@@ -110,9 +118,10 @@ class EmformerEncoder(nn.Module):
             ] = 1
             total_right_length += this_right_length
 
+        # remove unused right masks
         mask_left = mask_left[:, :, :total_right_length]
 
-        # 3. create a diagnal mask without padding
+        # 3. create a diagnal mask
         right_size = len(right_indexes)
         mask_diagnal = torch.diag(torch.ones(right_size))
         mask_diagnal = mask_diagnal.expand(1, right_size, right_size)
@@ -156,18 +165,18 @@ class EmformerEncoder(nn.Module):
         # 2. vgg subsampling
         if self.subsampling == "stack":
             bs, t_max, idim = audio_signal.shape
-            t_new = math.ceil(t_max / self.stack_length)
+            t_new = math.ceil(t_max / self.subsampling_factor)
             audio_signal = audio_signal.contiguous().view(
-                bs, t_new, idim * self.stack_length
+                bs, t_new, idim * self.subsampling_factor
             )
-            length = torch.ceil(length / self.stack_length).int()
+            length = torch.ceil(length / self.subsampling_factor).int()
         elif self.subsampling == "vgg":
             cache = audio_signal[:, -self.subsample.left_padding :, :]
             audio_signal, length = self.subsample(audio_signal, length, cache_audio)
             cache_audio = cache
             del cache
 
-        # 3. loop over layers while saving cache
+        # 3. loop over layers while saving cache at the same time
         if not cache_q:
             num_layers = len(self.layers)
             cache_q = cache_v = [None] * num_layers
@@ -184,41 +193,40 @@ class EmformerEncoder(nn.Module):
 
         return output, length, cache_q, cache_v, cache_audio
 
-    def forward(self, audio_signal, length):
+    def forward(self, audio_signals, audio_lens):
         """
 
         D_1: number of mels. This number has to match D_2 after frame stacking
         D_2: encoder dim.
 
-        audio_signal: [B, D_1, Tmax]
-        length: [B]
+        Args:
+            audio_signals (torch.Tensor): [B, D_1, Tmax]
+            audio_lens (torch.Tensor): [B]
 
-        output: [B, D_2, Tmax]
-
+        Returns:
+            torch.Tensor: [B, D_2, Tmax]
         """
 
         # 1. projection
-        audio_signal = audio_signal.transpose(1, 2)
-        audio_signal = self.linear(audio_signal)
+        x = audio_signals.transpose(1, 2)
+        x = self.linear(x)
 
         # 2. subsampling
         if self.subsampling == "stack":
-            bs, t_max, idim = audio_signal.shape
-            t_new = math.ceil(t_max / self.stack_length)
-            audio_signal = audio_signal.contiguous().view(
-                bs, t_new, idim * self.stack_length
-            )
-            length = torch.ceil(length / self.stack_length).int()
+            bs, t_max, idim = x.shape
+            t_new = math.ceil(t_max / self.subsampling_factor)
+            x = x.contiguous().view(bs, t_new, idim * self.subsampling_factor)
+            audio_lens = torch.ceil(audio_lens / self.subsampling_factor).int()
         elif self.subsampling == "vgg":
-            audio_signal, length = self.subsample(audio_signal, length)
-            t_new = audio_signal.size(1)
+            x, audio_lens = self.subsample(x, audio_lens)
+            t_new = x.size(1)
 
         # 3. create attention mask
-        mask, right_indexes = self.create_mask(length, t_new, audio_signal.device)
+        mask, right_indexes = self.create_mask(audio_lens, t_new, x.device)
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
-        output = torch.cat([audio_signal[:, right_indexes, :], audio_signal], dim=1)
+        output = torch.cat([x[:, right_indexes, :], x], dim=1)
 
         # 5. loop over layers.
         for layer in self.layers:
@@ -227,7 +235,7 @@ class EmformerEncoder(nn.Module):
         # 6. Trim copied right context
         output = output[:, len(right_indexes) :, :].transpose(1, 2)
 
-        return output, length
+        return output, audio_lens
 
 
 class EmformerBlock(nn.Module):
@@ -265,17 +273,18 @@ class EmformerBlock(nn.Module):
 
     def recognize(self, input, cache_k=None, cache_v=None):
         """
-        At inference time, the notion of Left, Chunk, Right context still exists,
-        because without them, compatibility with training will be lost.
-        For example, at training time, the output for t_0, t_1, t_2 is determined
-        by the input of t_0, t_1, t_2 PLUS right contexts.
-        This is also true for left contexts.
+        Note: At inference time, the notion of Left, Chunk, Right contexts still exists
+            because without them, the compatibility with training will be lost.
+            For example, at training time, the output for t_0, t_1, t_2 is determined
+            by the input of t_0, t_1, t_2 PLUS right contexts.
+            This must be the case for inference too.
 
         Args:
             input (torch.Tensor): [1, C+R, D]
             cache_k (torch.Tensor): [1, H, L, D/H]
             cache_v (torch.Tensor): [1, H, L, D/H]
         """
+        # 0. layer norm
         input = self.ln_in(input)
 
         # 1. calculate q -> [B, H, C+R, D]
@@ -311,12 +320,14 @@ class EmformerBlock(nn.Module):
         )
         attn_out = output + input
 
+        # 6. layernorm
         output = self.ln_out_1(attn_out)
 
-        # 6. feed forward and add residual
+        # 7. feed forward and add residual
         output = self.linear_out_1(output)
         output = self.linear_out_2(output) + attn_out
 
+        # 8. layernorm
         output = self.ln_out_2(output)
 
         return output, (cache_k, cache_v)
@@ -327,12 +338,14 @@ class EmformerBlock(nn.Module):
         N: number of chunks
         R: number of right contexts in one chunk
 
-        input: [B, Total_R+Tmax, D]
-        mask: [B, 1, Total_R+Tmax, Total_R+Tmax]
+        Args:
+            input (torch.Tensor): [B, Total_R+Tmax, D]
+            mask (torch.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
 
-        output: [B, Total_R+Tmax, D]
-
+        Returns:
+            torch.Tensor: [B, Total_R+Tmax, D]
         """
+
         bs, t_max, _ = input.shape
 
         # 1. perform layer norm
@@ -356,7 +369,6 @@ class EmformerBlock(nn.Module):
         attn_probs = self.attn_dropout(attn_probs)
 
         # 5. attend and add residual
-        # NEXT: check the correct implementation. especially around residual
         output = torch.matmul(attn_probs, v)
         output = (
             output.transpose(1, 2).contiguous().view(bs, -1, self.num_heads * self.d_k)

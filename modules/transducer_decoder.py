@@ -5,7 +5,7 @@ import torch
 from modules.greedy_inference import GreedyInference, Hypothesis, NBestHypotheses
 
 
-class RNNTDecoding(object):
+class TransducerDecoder(object):
     """
     Used for performing RNN-T auto-regressive decoding of the Decoder+Joint
     network given the encoder state.
@@ -17,20 +17,20 @@ class RNNTDecoding(object):
         be used for decoding.
     """
 
-    def __init__(self, decoder, joint, vocabulary):
+    def __init__(self, predictor, joint, vocabulary):
         super().__init__()
 
         self.blank_id = len(vocabulary)
         self.labels_map = dict([(i, vocabulary[i]) for i in range(len(vocabulary))])
 
         self.decoding = GreedyInference(
-            decoder_model=decoder,
-            joint_model=joint,
+            predictor=predictor,
+            joint=joint,
             blank_index=self.blank_id,
             max_symbols_per_step=30,
         )
 
-    def rnnt_decoder_predictions_tensor(
+    def generate_hypotheses(
         self,
         encoder_output: torch.Tensor,
         encoded_lengths: torch.Tensor,
@@ -114,20 +114,9 @@ class RNNTDecoding(object):
             prediction = [p for p in prediction if p != self.blank_id]
 
             # De-tokenize the integer tokens
-            hypothesis = self.decode_tokens_to_str(prediction)
+            hypothesis = "".join(
+                [self.labels_map[c] for c in prediction if c != self.blank_id]
+            )
             hypotheses.append(hypothesis)
 
         return hypotheses
-
-    def decode_tokens_to_str(self, tokens: List[int]) -> str:
-        """
-        Implemented by subclass in order to decoder a token list into a string.
-
-        Args:
-            tokens: List of int representing the token ids.
-
-        Returns:
-            A decoded string.
-        """
-        hypothesis = "".join([self.labels_map[c] for c in tokens if c != self.blank_id])
-        return hypothesis

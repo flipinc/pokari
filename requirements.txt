@@ -2,9 +2,9 @@ sphinx
 pre-commit
 black
 mlflow
-hydra
 mypy
 omegaconf
+hydra-core
 pytorch-lightning
 librosa
 soundfile

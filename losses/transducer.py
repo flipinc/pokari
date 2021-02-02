@@ -9,8 +9,8 @@ class warprnnt(nn.Module):
         return 1
 
 
-class RNNTLoss(nn.modules.loss._Loss):
-    def __init__(self, num_classes, reduction="mean_batch"):
+class TransducerLoss(nn.modules.loss._Loss):
+    def __init__(self, vocab_size, reduction="mean_batch"):
         """
         RNN-T Loss function based on https://github.com/HawkAaron/warp-transducer.
 
@@ -34,30 +34,30 @@ class RNNTLoss(nn.modules.loss._Loss):
             is not exhausted.
 
         Args:
-            num_classes: Number of target classes for the joint network to predict.
+            vocab_size: Number of target classes for the joint network to predict.
                 (Excluding the RNN-T blank token).
 
             reduction: Type of reduction to perform on loss. Possibly values are `mean`,
                 `sum` or None. None will return a torch vector comprising the individual
                 loss values of the batch.
         """
-        super(RNNTLoss, self).__init__()
+        super().__init__()
 
         if reduction not in [None, "mean", "sum", "mean_batch"]:
             raise ValueError("`reduction` must be one of [mean, sum, mean_batch]")
 
-        self._blank = num_classes
+        self._blank = vocab_size
         self.reduction = reduction
         self._loss = warprnnt.RNNTLoss(blank=self._blank, reduction="none")
 
-    def forward(self, log_probs, targets, input_lengths, target_lengths):
+    def forward(self, log_probs, targets, encoded_lens, decoded_lens):
         # Cast to int 32
         targets = targets.int()
-        input_lengths = input_lengths.int()
-        target_lengths = target_lengths.int()
+        encoded_lens = encoded_lens.int()
+        decoded_lens = decoded_lens.int()
 
-        max_logit_len = input_lengths.max()
-        max_targets_len = target_lengths.max()
+        max_logit_len = encoded_lens.max()
+        max_targets_len = decoded_lens.max()
 
         # Force cast joint to float32
         if log_probs.dtype != torch.float32:
@@ -66,7 +66,7 @@ class RNNTLoss(nn.modules.loss._Loss):
         # Ensure that shape mismatch does not occur due to padding
         # Due to padding and subsequent downsampling, it may be possible that
         # max sequence length computed does not match the actual max sequence length
-        # of the log_probs tensor, therefore we increment the input_lengths by the
+        # of the log_probs tensor, therefore we increment the encoded_lens by the
         # difference. This difference is generally small.
         if log_probs.shape[1] != max_logit_len:
             log_probs = log_probs.narrow(
@@ -87,8 +87,8 @@ class RNNTLoss(nn.modules.loss._Loss):
         loss = self._loss(
             acts=log_probs,
             labels=targets,
-            act_lens=input_lengths,
-            label_lens=target_lengths,
+            act_lens=encoded_lens,
+            label_lens=decoded_lens,
         )
 
         # Loss reduction can be dynamic, so reset it after call
@@ -103,8 +103,8 @@ class RNNTLoss(nn.modules.loss._Loss):
         del (
             log_probs,
             targets,
-            input_lengths,
-            target_lengths,
+            encoded_lens,
+            decoded_lens,
         )
 
         return loss

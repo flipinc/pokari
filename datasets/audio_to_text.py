@@ -1,10 +1,10 @@
 from typing import Callable, List, Optional, Union
 
 import torch
-
 from frontends.audio_preprocess import WaveformFeaturizer
-from frontends.manifest import ManifestCollector
 from frontends.text_parser import make_parser
+
+from datasets.manifest import ManifestCollector
 
 
 class AudioToCharDataset(torch.utils.data.Dataset):

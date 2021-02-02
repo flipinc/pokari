@@ -6,130 +6,44 @@ from typing import Dict, List
 
 import pytorch_lightning as pl
 import torch
-from frontends.audio_augment import AudioAugmentor, SpeedPerturbation
-from frontends.audio_preprocess import AudioToMelSpectrogramPreprocessor
-from frontends.audio_to_text import AudioToCharDataset
-from frontends.spec_augment import SpectrogramAugmentation
-from losses.transducer import RNNTLoss
-from metrics.wer import RNNTWER
-
-# from modules.emformer_encoder import EmformerEncoder
-from modules.transducer_decoder import RNNTDecoding
-from modules.transducer_joint import RNNTJoint
-from modules.transducer_predictor import RNNTDecoder
-from optimizers.lr_scheduler import CosineAnnealing
+from datasets.audio_to_text import AudioToCharDataset
+from frontends.audio_augment import get_augmentations
+from hydra.utils import instantiate
+from losses.transducer import TransducerLoss
+from metrics.wer import TransducerWER
+from modules.transducer_decoder import TransducerDecoder
+from omegaconf import DictConfig
 
 
-class EncDecRNNTModel(pl.LightningModule):
-    """Base class for encoder decoder RNNT-based models."""
+class Transducer(pl.LightningModule):
+    """Lightning Module for Transducer models."""
 
-    def __init__(self, trainer: pl.Trainer = None):
+    def __init__(self, cfg: DictConfig, trainer: pl.Trainer):
         super().__init__()
 
-        labels = [
-            " ",
-            "a",
-            "b",
-            "c",
-            "d",
-            "e",
-            "f",
-            "g",
-            "h",
-            "i",
-            "j",
-            "k",
-            "l",
-            "m",
-            "n",
-            "o",
-            "p",
-            "q",
-            "r",
-            "s",
-            "t",
-            "u",
-            "v",
-            "w",
-            "x",
-            "y",
-            "z",
-            "'",
-        ]
-        self.labels = labels
+        self.labels = cfg.labels
 
-        self._train_dl = None
-        self._validation_dl = None
-        self._trainer = trainer
+        self.train_dl = self.setup_dataloader_from_config(cfg.train_ds)
+        self.validation_dl = self.setup_dataloader_from_config(cfg.validation_ds)
+        self.trainer = trainer
 
-        self.setup_training_data()
-        self.setup_validation_data()
+        self.preprocessor = instantiate(cfg.preprocessor)
+        self.spec_augment = instantiate(cfg.spec_augment)
 
-        ###
-        # Encoder
-        ###
-
-        # for contextNet
-        # enc_hidden = 1024
-
-        # for conformer
-        # enc_hidden = 256
-
-        # for emformer
-        enc_hidden = 512
-
-        ###
-        # Predictor
-        ###
-
-        # for contextNet, conformer
-        pred_hidden = 320
-        pred_num_layers = 1
-        emded_dim = 320
-
-        # for emformer
-        # pred_hidden = 512
-        # pred_num_layers = 2
-        # emded_dim = 256
-
-        ###
-        # Joint
-        ###
-
-        # for contextNet, conformer
-        joint_hidden = 320
-
-        # for emformer
-        # joint_hidden = 640
-
-        # Initialize components
-        self.preprocessor = AudioToMelSpectrogramPreprocessor()
-        self.spec_augmentation = SpectrogramAugmentation()
-
-        # self.encoder = ConvASREncoder(conv_asr_encoder)
-        # self.encoder = ConformerEncoder(conformer_asr_encoder)
-        # self.encoder = EmformerEncoder(emformer_encoder_config)
-        self.decoder = RNNTDecoder(
-            pred_hidden=pred_hidden,
-            num_layers=pred_num_layers,
-            vocab_size=len(labels),
-            emded_dim=emded_dim,
-        )
-        self.joint = RNNTJoint(
-            enc_hidden=enc_hidden,
-            pred_hidden=pred_hidden,
-            joint_hidden=joint_hidden,
-            num_classes=len(labels),
+        self.encoder = instantiate(cfg.encoder)
+        self.predictor = instantiate(cfg.predictor, vocab_size=len(self.labels))
+        self.joint = instantiate(
+            cfg.joint,
+            encoder_hidden=cfg.encoder.dim_model,
+            predictor_hidden=cfg.predictor.dim_model,
+            vocab_size=len(self.labels),
         )
 
-        self.loss = RNNTLoss(num_classes=len(labels))
-
-        # Setup decoding objects
-        self.decoding = RNNTDecoding(
-            decoder=self.decoder, joint=self.joint, vocabulary=labels
+        self.loss = TransducerLoss(vocab_size=len(self.labels))
+        self.decoder = TransducerDecoder(
+            predictor=self.predictor, joint=self.joint, labels=self.labels
         )
-        # Setup WER calculation
-        self.wer = RNNTWER(
+        self.wer = TransducerWER(
             decoding=self.decoding,
             batch_dim_index=0,
             use_cer=False,
@@ -137,32 +51,57 @@ class EncDecRNNTModel(pl.LightningModule):
             dist_sync_on_step=True,
         )
 
-        self._optimizer = torch.optim.Adam(
-            self.parameters(),
-            lr=0.0005,
-            betas=(0.9, 0.999),
-            # for contextNet (probably this was the cause of degradation)
-            # weight_decay=0.001
-            # for conformer
-            weight_decay=0.0001,
+        self.lr_scheduler_config = (
+            cfg.optimizer.pop("lr_scheduler")
+            if "lr_scheduler" in cfg.optimizer
+            else None
         )
-        self._scheduler = CosineAnnealing(
-            self._optimizer,
-            max_steps=400000,
-            min_lr=1e-6,
-            warmup_steps=20000,  # 5% of total steps
+
+        self.variatinoal_noise_config = (
+            cfg.optimizer.pop("variational_noise")
+            if "variational_noise" in cfg.optimizer
+            else None
         )
+
+        optimizer = cfg.optimizer.pop("name")
+        if optimizer == "adam":
+            self.optimizer = torch.optim.Adam(self.parameters(), **cfg.optimizer)
+        else:
+            raise NotImplementedError(f"{optimizer} is not yet supported.")
+
+    def setup(self, stage):
+        if stage == "fit":
+            total_devices = self.hparams.n_gpus * self.hparams.n_nodes
+            train_batches = len(self.train_dataloader()) // total_devices
+            self.total_train_steps = (
+                self.hparams.epochs * train_batches
+            ) // self.hparams.accumulate_grad_batches
 
     def configure_optimizers(self):
-        return ([self._optimizer], [{"scheduler": self._scheduler, "interval": "step"}])
+        if self.lr_scheduler_config:
+            warmup_ratio = self.lr_scheduler_config.pop("warmup_ratio")
+            self.warmup_steps = self.total_train_steps * warmup_ratio
+            self.lr_scheduler = instantiate(
+                self.lr_scheduler_config,
+                self.optimizer,
+                max_steps=self.total_train_steps,
+                warmup_steps=self.warmup_steps,
+            )
+            return (
+                [self.optimizer],
+                [{"scheduler": self.lr_scheduler, "interval": "step"}],
+            )
+        else:
+            self.warmup_steps = 0
+            return self.optimizer
 
     def train_dataloader(self):
-        if self._train_dl is not None:
-            return self._train_dl
+        if self.train_dl is not None:
+            return self.train_dl
 
     def val_dataloader(self):
-        if self._validation_dl is not None:
-            return self._validation_dl
+        if self.validation_dl is not None:
+            return self.validation_dl
 
     @torch.no_grad()
     def transcribe(
@@ -205,12 +144,12 @@ class EncDecRNNTModel(pl.LightningModule):
                         fp.write(json.dumps(entry) + "\n")
 
                 config = {
-                    "paths2audio_files": paths2audio_files,
+                    "audio_filepaths": paths2audio_files,
                     "batch_size": batch_size,
                     "temp_dir": tmpdir,
                 }
 
-                temporary_datalayer = self._setup_transcribe_dataloader(config)
+                temporary_datalayer = self.setup_transcribe_dataloader(config)
                 for test_batch in temporary_datalayer:
                     if streaming is False:
                         encoded, encoded_len = self.forward(
@@ -218,7 +157,7 @@ class EncDecRNNTModel(pl.LightningModule):
                             input_signal_length=test_batch[1].to(device),
                         )
 
-                        hypotheses += self.decoding.rnnt_decoder_predictions_tensor(
+                        hypotheses += self.decoding.generate_hypotheses(
                             encoded, encoded_len
                         )[0]
                     else:
@@ -278,8 +217,11 @@ class EncDecRNNTModel(pl.LightningModule):
                             (
                                 current_hypotheses,
                                 hidden,
-                            ) = self.decoding.rnnt_decoder_predictions_tensor(
-                                encoded, encoded_len.to(device), hidden, streaming=True,
+                            ) = self.decoding.generate_hypotheses(
+                                encoded,
+                                encoded_len.to(device),
+                                hidden,
+                                streaming=True,
                             )
                             hypotheses += current_hypotheses
 
@@ -289,92 +231,71 @@ class EncDecRNNTModel(pl.LightningModule):
             self.train(mode=mode)
         return hypotheses
 
-    def _setup_dataloader_from_config(sel, training, batch_size=None, **kwargs):
-        dataset = AudioToCharDataset(**kwargs)
+    def setup_dataloader_from_config(self, cfg: DictConfig):
+        augmentor = get_augmentations(cfg["augmentor"])
+        dataset = AudioToCharDataset(
+            manifest_filepath=cfg["manifest_filepath"],
+            labels=self.labels,
+            sample_rate=cfg["sample_rate"],
+            int_values=cfg.get("int_values", False),
+            augmentor=augmentor,
+            max_duration=cfg.get("max_duration", None),
+            min_duration=cfg.get("min_duration", None),
+            max_utts=cfg.get("max_utts", 0),
+            blank_index=cfg.get("blank_index", -1),
+            unk_index=cfg.get("unk_index", -1),
+            normalize=cfg.get("normalize_transcripts", False),
+            trim=cfg.get("trim_silence", False),
+            load_audio=cfg.get("load_audio", True),
+            parser=cfg.get("parser", "en"),
+            add_misc=cfg.get("add_misc", False),
+        )
 
         return torch.utils.data.DataLoader(
             dataset=dataset,
-            batch_size=batch_size,  # if batch_size else BATCH_SIZE,
+            batch_size=cfg["batch_size"],
             collate_fn=dataset.collate_fn,
-            drop_last=False,
-            shuffle=training,
-            num_workers=4,
-            pin_memory=True,
+            drop_last=cfg.get("drop_last", False),
+            shuffle=cfg["shuffle"],
+            num_workers=cfg.get("num_workers", 0),
+            pin_memory=cfg.get("pin_memory", False),
         )
 
-    def setup_training_data(self):
-        augmentation = SpeedPerturbation(sr=16000, resample_type="kaiser_fast")
-
-        self._train_dl = self._setup_dataloader_from_config(
-            training=True,
-            manifest_filepath="drive/MyDrive/jynote/manifest_train.json",
-            labels=self.labels,
-            sample_rate=16000,
-            int_values=False,
-            max_duration=None,
-            min_duration=None,
-            max_utts=0,
-            blank_index=-1,
-            unk_index=-1,
-            normalize=True,
-            trim=False,
-            load_audio=True,
-            parser="en",
-            add_misc=False,
-            augmentor=AudioAugmentor([(1.0, augmentation)]),
-        )
-
-    def setup_validation_data(self):
-        self._validation_dl = self._setup_dataloader_from_config(
-            training=False,
-            manifest_filepath="drive/MyDrive/jynote/manifest_val.json",
-            labels=self.labels,
-            sample_rate=16000,
-            int_values=False,
-            max_duration=None,
-            min_duration=None,
-            max_utts=0,
-            blank_index=-1,
-            unk_index=-1,
-            normalize=True,
-            trim=False,
-            load_audio=True,
-            parser="en",
-            add_misc=False,
-        )
-
-    def forward(self, input_signal=None, input_signal_length=None):
-        processed_signal, processed_signal_length = self.preprocessor(
-            x=input_signal, seq_len=input_signal_length,
+    def forward(self, audio_signals=None, audio_lens=None):
+        audio_signals, audio_lens = self.preprocessor(
+            audio_signals=audio_signals,
+            audio_lens=audio_lens,
         )
 
         if self.training:
-            processed_signal = self.spec_augmentation(input_spec=processed_signal)
+            audio_signals = self.spec_augmentation(audio_signals=audio_signals)
 
-        encoded, encoded_len = self.encoder(
-            audio_signal=processed_signal, length=processed_signal_length
+        encoded_signals, encoded_lens = self.encoder(
+            audio_signals=audio_signals, audio_lens=audio_lens
         )
 
-        return encoded, encoded_len
+        return encoded_signals, encoded_lens
 
     def training_step(self, batch, batch_idx):
-        signal, signal_len, transcript, transcript_len = batch
+        audio_signals, audio_lens, transcripts, transcript_lens = batch
 
-        encoded, encoded_len = self.forward(
-            input_signal=signal, input_signal_length=signal_len
+        encoded_signals, encoded_lens = self.forward(
+            audio_signal=audio_signals, audio_lens=audio_lens
         )
-        del signal
+        del audio_signals, audio_lens
 
-        decoder, target_length = self.decoder(
-            targets=transcript, target_length=transcript_len
+        decoded_targets, decoded_lens = self.predictor(
+            targets=transcripts, target_lens=transcript_lens
         )
 
-        joint = self.joint(encoder_outputs=encoded, decoder_outputs=decoder)
+        joint_outputs = self.joint(
+            encoder_outputs=encoded_signals, predictor_ouputs=decoded_targets
+        )
         loss_value = self.loss(
-            log_probs=joint,
-            targets=transcript,
-            input_lengths=encoded_len,
-            target_lengths=target_length,
+            log_probs=joint_outputs,
+            targets=transcripts,
+            encoded_lens=encoded_lens,
+            decoded_lens=decoded_lens,
         )
 
         tensorboard_logs = {
@@ -383,7 +304,7 @@ class EncDecRNNTModel(pl.LightningModule):
         }
 
         if (self._trainer.global_step + 1) % self._trainer.log_every_n_steps == 0:
-            self.wer.update(encoded, encoded_len, transcript, transcript_len)
+            self.wer.update(encoded_signals, encoded_lens, transcripts, transcript_lens)
             _, scores, words = self.wer.compute()
             tensorboard_logs.update({"training_batch_wer": scores.float() / words})
 
@@ -392,30 +313,32 @@ class EncDecRNNTModel(pl.LightningModule):
         return {"loss": loss_value}
 
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
-        signal, signal_len, transcript, transcript_len = batch
+        audio_signals, audio_lens, transcripts, transcript_lens = batch
 
-        encoded, encoded_len = self.forward(
-            input_signal=signal, input_signal_length=signal_len
+        encoded_signals, encoded_lens = self.forward(
+            audio_signals=audio_signals, audio_lens=audio_lens
         )
-        del signal
+        del audio_signals, audio_lens
 
         tensorboard_logs = {}
 
-        decoder, target_length = self.decoder(
-            targets=transcript, target_length=transcript_len
+        decoded_transcripts, decoded_lens = self.decoder(
+            transcripts=transcripts, transcript_lens=transcript_lens
         )
-        joint = self.joint(encoder_outputs=encoded, decoder_outputs=decoder)
+        joint_outputs = self.joint(
+            encoded_signals=encoded_signals, decoded_transcripts=decoded_transcripts
+        )
 
         loss_value = self.loss(
-            log_probs=joint,
-            targets=transcript,
-            input_lengths=encoded_len,
-            target_lengths=target_length,
+            log_probs=joint_outputs,
+            transcripts=transcripts,
+            encoded_lens=encoded_lens,
+            decoded_lens=decoded_lens,
         )
 
         tensorboard_logs["val_loss"] = loss_value
 
-        self.wer.update(encoded, encoded_len, transcript, transcript_len)
+        self.wer.update(encoded_signals, encoded_lens, transcripts, transcript_lens)
         wer, wer_num, wer_denom = self.wer.compute()
 
         tensorboard_logs["val_wer_num"] = wer_num
@@ -424,35 +347,39 @@ class EncDecRNNTModel(pl.LightningModule):
 
         return tensorboard_logs
 
-    def _setup_transcribe_dataloader(
-        self, config: Dict
-    ) -> "torch.utils.data.DataLoader":
-        """
-        Setup function for a temporary data loader which wraps the provided audio file.
+    def setup_transcribe_dataloader(self, config: Dict):
+        dl_config = {
+            "manifest_filepath": os.path.join(config["temp_dir"], "manifest.json"),
+            "sample_rate": self.preprocessor.sample_rate,
+            "labels": self.labels,
+            "batch_size": min(config["batch_size"], len(config["audio_filepaths"])),
+            "trim_silence": True,
+        }
 
-        Args:
-            config: A python dictionary which contains the following keys:
-            paths2audio_files: (a list) of paths to audio files. The files should be
-                relatively short fragments. Recommended length per file is between 5
-                and 25 seconds.
-            batch_size: (int) batch size to use during inference. Bigger will result
-                in better throughput performance but would use more memory.
-            temp_dir: (str) A temporary directory where the audio manifest is
-                temporarily stored.
+        temporary_datalayer = self.setup_dataloader_from_config(DictConfig(dl_config))
 
-        Returns:
-            A pytorch DataLoader for the given audio file(s).
-        """
-        temporary_datalayer = self._setup_dataloader_from_config(
-            training=False,
-            manifest_filepath=os.path.join(config["temp_dir"], "manifest.json"),
-            sample_rate=self.preprocessor.sample_rate,
-            labels=self.labels,
-            batch_size=min(config["batch_size"], len(config["paths2audio_files"])),
-            trim=True,
-        )
         return temporary_datalayer
 
     def on_after_backward(self):
         super().on_after_backward()
-        # TODO: add varidational noise
+
+        if self.variatinoal_noise_config:
+            mean = self.variatinoal_noise_config["mean"]
+            std = self.variatinoal_noise_config["std"]
+            start_step = (
+                self.warmup_steps
+                if self.variatinoal_noise_config["start_step"] == -1
+                else self.variatinoal_noise_config["start_step"]
+            )
+
+            if std > 0 and self.global_step >= start_step:
+                for param_name, param in self.decoder.named_parameters():
+                    if param.grad is not None:
+                        noise = torch.normal(
+                            mean=mean,
+                            std=std,
+                            size=param.size(),
+                            device=param.device,
+                            dtype=param.dtype,
+                        )
+                        param.grad.data.add_(noise)

@@ -55,15 +55,15 @@ class GreedyInference(nn.Module):
 
     def __init__(
         self,
-        decoder_model,
-        joint_model,
+        predictor,
+        joint,
         blank_index: int,
         max_symbols_per_step: Optional[int] = None,
     ):
         super().__init__()
 
-        self.decoder = decoder_model
-        self.joint = joint_model
+        self.predictor = predictor
+        self.joint = joint
 
         self._blank_index = blank_index
         self._SOS = blank_index
@@ -102,14 +102,14 @@ class GreedyInference(nn.Module):
         else:
             # Label is an integer
             if label == self._SOS:
-                return self.decoder.predict(
+                return self.predictor.predict(
                     None, hidden, add_sos=add_sos, batch_size=batch_size
                 )
 
             label = label_collate([[label]])
 
         # output: [B, 1, K]
-        return self.decoder.predict(
+        return self.predictor.predict(
             label, hidden, add_sos=add_sos, batch_size=batch_size
         )
 
