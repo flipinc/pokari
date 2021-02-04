@@ -5,15 +5,6 @@ Welcome to Pokari's documentation!
    :maxdepth: 2
    :caption: Contents:
 
-   corpuses
-   datasets
-   losses
-   metrics
-   models
-   modules
-   optimizers
-   
-
 
 Indices and tables
 ==================

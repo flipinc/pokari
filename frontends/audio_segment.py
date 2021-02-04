@@ -1,7 +1,6 @@
 import librosa
 import numpy as np
 import soundfile as sf
-from hydra.utils import to_absolute_path
 
 
 class AudioSegment(object):
@@ -94,7 +93,7 @@ class AudioSegment(object):
         :param duration: duration in seconds when loading audio
         :return: numpy array of samples
         """
-        with sf.SoundFile(to_absolute_path(audio_file), "r") as f:
+        with sf.SoundFile(audio_file, "r") as f:
             dtype = "int32" if int_values else "float32"
             sample_rate = f.samplerate
             if offset > 0:

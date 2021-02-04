@@ -65,3 +65,11 @@ class TestEmformer:
         assert torch.sum(mask[0, 0, 5:8, 5:8] == 0) == 9  # without left context
         assert torch.sum(mask[0, 0, 8:11, 6:11] == 0) == 15  # with left context
         assert torch.sum(mask[0, 0, 11:14, 9:14] == 0) == 3  # padding
+
+    def test_padding():
+        # the output of timestep that corresponds to paddding is zero
+        assert 1 == 1
+
+    def test_left_context_attn():
+        # value of left context attn at training and inference time should be the same
+        assert 1 == 1

@@ -186,6 +186,9 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         self.stft_exact_pad = stft_exact_pad
         self.stft_conv = stft_conv
 
+        # onnx does not support pytorch native stft yet
+        # in that case, stft_conv is the alternative
+        # https://github.com/pytorch/pytorch/issues/31317
         if stft_conv:
             if stft_exact_pad:
                 self.stft = STFTExactPad(
@@ -208,6 +211,7 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
                 window_fn(self.win_length, periodic=False) if window_fn else None
             )
             self.register_buffer("window", window_tensor)
+
             self.stft = lambda x: torch.stft(
                 x,
                 n_fft=self.n_fft,
@@ -280,6 +284,7 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
 
         audio_lens = self.get_seq_len(audio_lens.float())
 
+        # adjust audio length for native stft so it is same as audio_lens
         if self.stft_exact_pad and not self.stft_conv:
             p = (self.n_fft - self.hop_length) // 2
             x = torch.nn.functional.pad(x.unsqueeze(1), (p, p), "reflect").squeeze(1)

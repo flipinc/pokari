@@ -34,8 +34,8 @@ class TransducerDecoder(object):
         self,
         encoder_output: torch.Tensor,
         encoded_lengths: torch.Tensor,
-        hidden=None,
-        streaming=False,
+        cache_rnn_state=None,
+        mode="normal",
     ) -> (List[str], Optional[List[List[str]]]):
         """
         Decode an encoder output by autoregressive decoding of the Decoder+Joint
@@ -63,22 +63,23 @@ class TransducerDecoder(object):
         """
         # Compute hypotheses
         with torch.no_grad():
-            hypotheses_list, hidden = self.infer(
+            hypotheses_list, cache_rnn_state = self.infer(
                 encoder_output=encoder_output,
                 encoded_lengths=encoded_lengths,
-                hidden=hidden,
-                streaming=streaming,
+                cache_rnn_state=cache_rnn_state,
+                mode=mode,
             )
 
             # extract the hypotheses
             hypotheses_list: List[Hypothesis] = hypotheses_list[0]
 
-        prediction_list = hypotheses_list
+        if mode == "stream":
+            return hypotheses_list, cache_rnn_state
 
-        if isinstance(prediction_list[0], NBestHypotheses):
+        if isinstance(hypotheses_list[0], NBestHypotheses):
             hypotheses = []
             all_hypotheses = []
-            for nbest_hyp in prediction_list:  # type: NBestHypotheses
+            for nbest_hyp in hypotheses_list:  # type: NBestHypotheses
                 n_hyps = (
                     nbest_hyp.n_best_hypotheses
                 )  # Extract all hypotheses for this sample
@@ -88,8 +89,8 @@ class TransducerDecoder(object):
 
             return hypotheses, all_hypotheses
         else:
-            hypotheses = self.decode_hypothesis(prediction_list)  # type: List[str]
-            return hypotheses, hidden
+            hypotheses = self.decode_hypothesis(hypotheses_list)  # type: List[str]
+            return hypotheses, cache_rnn_state
 
     def decode_hypothesis(self, hypotheses_list: List[Hypothesis]) -> List[str]:
         """

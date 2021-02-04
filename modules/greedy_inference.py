@@ -73,7 +73,7 @@ class GreedyInference(nn.Module):
     def _pred_step(
         self,
         label: Union[torch.Tensor, int],
-        hidden: Optional[torch.Tensor],
+        state: Optional[List[torch.Tensor]],
         add_sos: bool = False,
         batch_size: Optional[int] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -82,14 +82,14 @@ class GreedyInference(nn.Module):
 
         Args:
             label: (int/torch.Tensor): Label or "Start-of-Signal" token.
-            hidden: (Optional torch.Tensor): RNN State vector
+            state: (Optional torch.Tensor): RNN State vector
             add_sos (bool): Whether to add a zero vector at the begging as
                 "start of sentence" token.
             batch_size: Batch size of the output tensor.
 
         Returns:
             g: (B, U, H) if add_sos is false, else (B, U + 1, H)
-            hid: (h, c) where h is the final sequence hidden state and c is
+            hid: (h, c) where h is the final sequence state and c is
                 the final cell state:
                     h (tensor), shape (L, B, H)
                     c (tensor), shape (L, B, H)
@@ -103,16 +103,17 @@ class GreedyInference(nn.Module):
             # Label is an integer
             if label == self._SOS:
                 return self.predictor.predict(
-                    None, hidden, add_sos=add_sos, batch_size=batch_size
+                    None, state, add_sos=add_sos, batch_size=batch_size
                 )
 
             label = label_collate([[label]])
 
         # output: [B, 1, K]
         return self.predictor.predict(
-            label, hidden, add_sos=add_sos, batch_size=batch_size
+            label, state, add_sos=add_sos, batch_size=batch_size
         )
 
+    @torch.no_grad()
     def _joint_step(self, enc, pred, log_normalize: Optional[bool] = None):
         """
         Common joint step based on AbstractRNNTJoint implementation.
@@ -126,15 +127,14 @@ class GreedyInference(nn.Module):
         Returns:
              logits of shape (B, T=1, U=1, V + 1)
         """
-        with torch.no_grad():
-            logits = self.joint.joint(enc, pred)
+        logits = self.joint.joint(enc, pred)
 
-            if log_normalize is None:
-                if not logits.is_cuda:  # Use log softmax only if on CPU
-                    logits = logits.log_softmax(dim=len(logits.shape) - 1)
-            else:
-                if log_normalize:
-                    logits = logits.log_softmax(dim=len(logits.shape) - 1)
+        if log_normalize is None:
+            if not logits.is_cuda:  # Use log softmax only if on CPU
+                logits = logits.log_softmax(dim=len(logits.shape) - 1)
+        else:
+            if log_normalize:
+                logits = logits.log_softmax(dim=len(logits.shape) - 1)
 
         return logits
 
@@ -142,8 +142,8 @@ class GreedyInference(nn.Module):
         self,
         encoder_output: torch.Tensor,
         encoded_lengths: torch.Tensor,
-        hidden=None,
-        streaming=False,
+        cache_rnn_state=None,
+        mode="normal",
     ):
         """Returns a list of hypotheses given an input batch of the encoder hidden embedding.
         Output token is generated auto-repressively.
@@ -169,20 +169,13 @@ class GreedyInference(nn.Module):
             self.joint.eval()
 
             with self.predictor.as_frozen(), self.joint.as_frozen():
-                if streaming:
-                    hypotheses = []
-                    for batch_idx in range(encoder_output.size(0)):
-                        inseq = encoder_output[batch_idx, :, :].unsqueeze(
-                            1
-                        )  # [T, 1, D]
-                        logitlen = encoded_lengths[batch_idx]
-                        sentence, hidden = self._greedy_decode(inseq, logitlen, hidden)
-                        hypotheses.append(sentence)
-                else:
-                    inseq = encoder_output  # [B, T, D]
-                    hypotheses = self._greedy_batch_decode(
-                        inseq, logitlen, device=inseq.device
-                    )
+                inseq = encoder_output  # [B, T, D]
+                hypotheses = self._greedy_batch_decode(
+                    inseq, logitlen, device=inseq.device
+                )
+
+            if mode == "stream":
+                return (hypotheses,), cache_rnn_state
 
             # Pack the hypotheses results
             packed_result = [
@@ -195,10 +188,14 @@ class GreedyInference(nn.Module):
         self.predictor.train(predictor_training_state)
         self.joint.train(joint_training_state)
 
-        return (packed_result,), hidden
+        return (packed_result,), cache_rnn_state
 
     @torch.no_grad()
-    def _greedy_decode(self, x: torch.Tensor, out_len: torch.Tensor, hidden=None):
+    def _greedy_decode(
+        self, x: torch.Tensor, out_len: torch.Tensor, cache_rnn_state=None
+    ):
+        """Greedy Decode for batch size = 1. Currently not used"""
+
         # x: [T, 1, D]
         # out_len: [seq_len]
 
@@ -225,7 +222,7 @@ class GreedyInference(nn.Module):
                 last_label = self._SOS if label == [] else label[-1]
 
                 # Perform prediction network and joint network steps.
-                g, hidden_prime = self._pred_step(last_label, hidden)
+                g, cache_rnn_state_prime = self._pred_step(last_label, cache_rnn_state)
                 logp = self._joint_step(f, g, log_normalize=None)[0, 0, 0, :]
 
                 del g
@@ -246,12 +243,12 @@ class GreedyInference(nn.Module):
                 else:
                     # Append token to label set, update RNN state.
                     label.append(k)
-                    hidden = hidden_prime
+                    cache_rnn_state = cache_rnn_state_prime
 
                 # Increment token counter.
                 symbols_added += 1
 
-        return label, hidden
+        return label, cache_rnn_state
 
     @torch.no_grad()
     def _greedy_batch_decode(
@@ -293,7 +290,7 @@ class GreedyInference(nn.Module):
             symbols_added = 0
 
             # Reset blank mask
-            blank_mask = torch.full_like(blank_mask, False)
+            blank_mask = torch.full_like(blank_mask, 0)
 
             # Update blank mask with time mask
             # Batch: [B, T, D], but Bi may have seq len < max(seq_lens_in_batch)
@@ -334,14 +331,21 @@ class GreedyInference(nn.Module):
                 # Update blank mask with current predicted blanks
                 # This is accumulating blanks over all time steps T and all target
                 # steps min(max_symbols, U)
-                k_is_blank = k == self._blank_index
-                blank_mask.bitwise_or_(k_is_blank)
+                k_is_blank = (k == self._blank_index).to(blank_mask.device)
+                # ideally this op should be inplace(bitwise_or_) but trace jit does
+                # not support it.
+                # blank_mask.bitwise_or_(k_is_blank.to(blank_mask.device))
+                blank_mask = blank_mask | k_is_blank
 
                 del k_is_blank
 
                 # If all samples predict / have predicted prior blanks, exit loop early
                 # This is equivalent to if single sample predicted k
-                if blank_mask.all():
+                result = is_all_one(blank_mask)
+
+                # this does not work for tracing
+                # if blank_mask.all():
+                if torch.is_nonzero(result):
                     not_blank = False
                 else:
                     # Collect batch indices where blanks occurred now/past
@@ -372,9 +376,21 @@ class GreedyInference(nn.Module):
                     # once they have occured (normally stopping condition of sample
                     # level loop).
                     for kidx, ki in enumerate(k):
-                        if blank_mask[kidx] == 0:
+                        # this does not work for tracing
+                        # if blank_mask[kidx] == 0:
+                        if not torch.is_nonzero(is_zero(blank_mask, kidx)):
                             label[kidx].append(ki)
 
                     symbols_added += 1
 
         return label
+
+
+@torch.jit.script
+def is_all_one(tensor: torch.Tensor):
+    return torch.tensor(tensor.all() * 1)
+
+
+@torch.jit.script
+def is_zero(tensor: torch.Tensor, idx: int):
+    return torch.tensor(tensor[idx] == 0)
