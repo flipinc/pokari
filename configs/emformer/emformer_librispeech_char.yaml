@@ -80,6 +80,8 @@ model:
     preemph: 0.97
     dither: 1e-5
     pad_to: 16
+    stft_exact_pad: true
+    stft_conv: true
 
   spec_augment:
     _target_: frontends.spec_augment.SpectrogramAugmentation

@@ -85,7 +85,6 @@ class TransducerWER(Metric):
         scores = 0.0
         references = []
         with torch.no_grad():
-            # prediction_cpu_tensor = tensors[0].long().cpu()
             targets_cpu_tensor = targets.long().cpu()
             tgt_lenths_cpu_tensor = target_lengths.long().cpu()
 
@@ -123,7 +122,6 @@ class TransducerWER(Metric):
         self.words += torch.tensor(
             words, device=self.words.device, dtype=self.words.dtype
         )
-        # return torch.tensor([scores, words]).to(predictions.device)
 
     def compute(self):
         wer = self.scores.float() / self.words

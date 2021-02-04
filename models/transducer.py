@@ -122,8 +122,8 @@ class Transducer(pl.LightningModule):
             return self.validation_dl
 
     @torch.no_grad()
-    def transcribe(
-        self, paths2audio_files: List[str], batch_size: int = 4, streaming=False
+    def simulate(
+        self, paths2audio_files: List[str], batch_size: int = 4, mode="normal"
     ) -> List[str]:
         """
         Uses greedy decoding to transcribe audio files. Use this method for debugging
@@ -145,7 +145,7 @@ class Transducer(pl.LightningModule):
         # We will store transcriptions here
         hypotheses = []
         # Model's mode and device
-        mode = self.training
+        is_training = self.training
         device = next(self.parameters()).device
         try:
             # Switch model to evaluation mode
@@ -169,85 +169,123 @@ class Transducer(pl.LightningModule):
 
                 temporary_datalayer = self.setup_transcribe_dataloader(config)
                 for test_batch in temporary_datalayer:
-                    if streaming is False:
-                        encoded, encoded_len = self.forward(
-                            input_signal=test_batch[0].to(device),
-                            input_signal_length=test_batch[1].to(device),
+                    audio_signals = test_batch[0].to(device)
+                    audio_lens = test_batch[1].to(device)
+
+                    if mode == "normal":
+                        audio_signals, audio_lens = self.preprocessor(
+                            audio_signals=audio_signals,
+                            audio_lens=audio_lens,
                         )
 
-                        hypotheses += self.decoding.generate_hypotheses(
-                            encoded, encoded_len
+                        encoded_signals, encoded_lens = self.encoder(
+                            audio_signals=audio_signals,
+                            audio_lens=audio_lens,
+                        )
+
+                        hypotheses += self.decoder.generate_hypotheses(
+                            encoded_signals, encoded_lens
                         )[0]
-                    else:
-                        processed_signal, processed_signal_length = self.preprocessor(
-                            x=test_batch[0].to(device),
-                            seq_len=test_batch[1].to(device),
+                    elif mode == "stream":
+                        t = audio_signals.size(1)
+
+                        if batch_size > 1:
+                            raise ValueError(
+                                "Only support batch size = 1 for streaming simulation "
+                                "because all audio lengths must be aligned"
+                            )
+
+                        base_length = (
+                            self.preprocessor.hop_length
+                            * self.encoder.subsampling_factor
                         )
 
-                        chunk_length = 128  # 10ms per frame * 128 = 1280ms
-                        right_length = 32  # 10ms per frame * 32 = 320ms
+                        pre_chunk_length = base_length * self.encoder.chunk_length
+                        pre_right_length = base_length * self.encoder.right_length
 
-                        t = processed_signal.size(2)
-                        num_chunks = math.ceil(t / chunk_length)
+                        num_chunks = math.ceil(t / pre_chunk_length)
 
-                        cache_q = cache_v = cache_audio = None
-                        hidden = None
+                        cache_rnn_state = None
+                        cache_k = cache_v = None
                         for i in range(num_chunks):
-                            start_offset = chunk_length * i
+                            start_offset = pre_chunk_length * i
                             end_offset = (
-                                chunk_length * (i + 1)
-                                if chunk_length * (i + 1) <= t
+                                pre_chunk_length * (i + 1)
+                                if pre_chunk_length * (i + 1) <= t
                                 else t
                             )
 
-                            remaining_space = t - (end_offset + right_length)
+                            remaining_space = t - (end_offset + pre_right_length)
                             if remaining_space >= 0:
-                                this_right_length = right_length
+                                this_right_length = pre_right_length
                             elif remaining_space < 0:
                                 this_right_length = t - end_offset
 
                             end_offset = end_offset + this_right_length
-                            end_offset_wo_padding = (
-                                end_offset
-                                if end_offset <= processed_signal_length.int()
-                                else processed_signal_length.int()
-                            )
 
-                            (
-                                encoded,
-                                encoded_len,
-                                cache_q,
-                                cache_v,
-                                cache_audio,
-                            ) = self.encoder.recognize(
-                                audio_signal=processed_signal[
-                                    :, :, start_offset:end_offset
-                                ],
-                                length=torch.Tensor(
-                                    [end_offset_wo_padding - start_offset]
-                                ),
-                                cache_q=cache_q,
-                                cache_v=cache_v,
-                                cache_audio=cache_audio,
-                            )
-
-                            # Make decoder stateful
                             (
                                 current_hypotheses,
-                                hidden,
-                            ) = self.decoding.generate_hypotheses(
-                                encoded,
-                                encoded_len.to(device),
-                                hidden,
-                                streaming=True,
+                                cache_k,
+                                cache_v,
+                                cache_rnn_state,
+                            ) = self.emformer_stream(
+                                audio_signals=audio_signals[:, start_offset:end_offset],
+                                audio_lens=torch.Tensor([end_offset - start_offset]).to(
+                                    device
+                                ),
+                                cache_rnn_state=cache_rnn_state,
+                                cache_k=cache_k,
+                                cache_v=cache_v,
                             )
+
                             hypotheses += current_hypotheses
 
                     del test_batch
         finally:
             # set mode back to its original value
-            self.train(mode=mode)
+            self.train(mode=is_training)
         return hypotheses
+
+    def emformer_stream(
+        self,
+        audio_signals,
+        audio_lens=None,
+        cache_rnn_state=None,
+        cache_k=None,
+        cache_v=None,
+    ):
+        if audio_lens is None:
+            bs = audio_signals.size(0)
+            # assuming all audio_signal has segment length (chunk length + right length)
+            base_length = self.preprocessor.hop_length * self.encoder.subsampling_factor
+
+            chunk_length = base_length * self.encoder.chunk_length
+            right_length = base_length * self.encoder.right_length
+
+            audio_lens = torch.Tensor([chunk_length + right_length] * bs).to(
+                audio_signals.device
+            )
+
+        audio_signals, audio_lens = self.preprocessor(
+            audio_signals=audio_signals,
+            audio_lens=audio_lens,
+        )
+
+        encoded_signals, encoded_lens, cache_k, cache_v = self.encoder.stream(
+            audio_signals=audio_signals,
+            audio_lens=audio_lens,
+            cache_k=cache_k,
+            cache_v=cache_v,
+        )
+
+        current_hypotheses, cache_rnn_state = self.decoder.generate_hypotheses(
+            encoded_signals,
+            encoded_lens,
+            cache_rnn_state,
+            mode="stream",
+        )
+
+        return current_hypotheses, cache_k, cache_v, cache_rnn_state
 
     def setup_dataloader_from_config(self, cfg: DictConfig):
         augmentor = get_augmentations(cfg["augmentor"]) if "augmentor" in cfg else None
@@ -279,36 +317,94 @@ class Transducer(pl.LightningModule):
             pin_memory=cfg.get("pin_memory", False),
         )
 
-    def forward(self, audio_signals=None, audio_lens=None):
-        audio_signals, audio_lens = self.preprocessor(
-            audio_signals=audio_signals,
-            audio_lens=audio_lens,
-        )
+    def forward(
+        self,
+        audio_signals,
+        # when streaming for the first iteration, audio_lens is unknown
+        audio_lens=None,
+        transcripts=None,
+        transcript_lens=None,
+        mode="normal",
+        cache_rnn_state=None,
+        # for emformer
+        cache_k=None,
+        cache_v=None,
+    ):
+        # TODO: Because ONNX only supports forward() for inference, streaming code is
+        # forcefully included. This makes this code messy as the output is completely
+        # different.
+        if mode == "normal":
+            audio_signals, audio_lens = self.preprocessor(
+                audio_signals=audio_signals,
+                audio_lens=audio_lens,
+            )
 
-        if self.training:
-            audio_signals = self.spec_augmentat(audio_signals=audio_signals)
+            if self.training:
+                audio_signals = self.spec_augment(audio_signals=audio_signals)
 
-        encoded_signals, encoded_lens = self.encoder(
-            audio_signals=audio_signals, audio_lens=audio_lens
-        )
+            encoded_signals, encoded_lens = self.encoder(
+                audio_signals=audio_signals, audio_lens=audio_lens
+            )
+            del audio_signals, audio_lens
 
-        return encoded_signals, encoded_lens
+            decoded_targets, decoded_lens = self.predictor(
+                targets=transcripts, target_lens=transcript_lens
+            )
+            del transcripts, transcript_lens
+
+            joint_outputs = self.joint(
+                encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
+            )
+
+            return (
+                encoded_signals,
+                encoded_lens,
+                decoded_targets,
+                decoded_lens,
+                joint_outputs,
+            )
+        elif mode == "stream":
+            with torch.no_grad():
+                is_training = self.training
+
+                try:
+                    self.eval()
+
+                    (
+                        current_hypotheses,
+                        cache_k,
+                        cache_v,
+                        cache_rnn_state,
+                    ) = self.emformer_stream(
+                        audio_signals=audio_signals,
+                        audio_lens=audio_lens,
+                        cache_k=cache_k,
+                        cache_v=cache_v,
+                        cache_rnn_state=cache_rnn_state,
+                    )
+
+                finally:
+                    self.train(mode=is_training)
+
+            return current_hypotheses, audio_lens, cache_k, cache_v, cache_rnn_state
 
     def training_step(self, batch, batch_idx):
         audio_signals, audio_lens, transcripts, transcript_lens = batch
 
-        encoded_signals, encoded_lens = self.forward(
-            audio_signals=audio_signals, audio_lens=audio_lens
+        (
+            encoded_signals,
+            encoded_lens,
+            decoded_targets,
+            decoded_lens,
+            joint_outputs,
+        ) = self.forward(
+            audio_signals=audio_signals,
+            audio_lens=audio_lens,
+            transcripts=transcripts,
+            transcript_lens=transcript_lens,
         )
         del audio_signals, audio_lens
 
-        decoded_targets, decoded_lens = self.predictor(
-            targets=transcripts, target_lens=transcript_lens
-        )
-
-        joint_outputs = self.joint(
-            encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
-        )
         loss_value = self.loss(
             log_probs=joint_outputs,
             targets=transcripts,
@@ -333,20 +429,19 @@ class Transducer(pl.LightningModule):
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         audio_signals, audio_lens, transcripts, transcript_lens = batch
 
-        encoded_signals, encoded_lens = self.forward(
-            audio_signals=audio_signals, audio_lens=audio_lens
+        (
+            encoded_signals,
+            encoded_lens,
+            decoded_targets,
+            decoded_lens,
+            joint_outputs,
+        ) = self.forward(
+            audio_signals=audio_signals,
+            audio_lens=audio_lens,
+            transcripts=transcripts,
+            transcript_lens=transcript_lens,
         )
         del audio_signals, audio_lens
-
-        tensorboard_logs = {}
-
-        decoded_targets, decoded_lens = self.predictor(
-            targets=transcripts, target_lens=transcript_lens
-        )
-
-        joint_outputs = self.joint(
-            encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
-        )
 
         loss_value = self.loss(
             log_probs=joint_outputs,
@@ -355,7 +450,7 @@ class Transducer(pl.LightningModule):
             decoded_lens=decoded_lens,
         )
 
-        tensorboard_logs["val_loss"] = loss_value
+        tensorboard_logs = {"val_loss": loss_value}
 
         self.wer.update(encoded_signals, encoded_lens, transcripts, transcript_lens)
         wer, wer_num, wer_denom = self.wer.compute()
@@ -364,7 +459,7 @@ class Transducer(pl.LightningModule):
         tensorboard_logs["val_wer_denom"] = wer_denom
         tensorboard_logs["val_wer"] = wer
 
-        return tensorboard_logs
+        self.log_dict(tensorboard_logs)
 
     def setup_transcribe_dataloader(self, config: Dict):
         dl_config = {

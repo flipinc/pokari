@@ -1,4 +1,4 @@
-FROM python:3.8
+FROM python:3.7
 
 WORKDIR /app
 
@@ -10,5 +10,10 @@ RUN pip install --pre torch torchvision torchaudio -f https://download.pytorch.o
 
 # install other libraries
 RUN pip install -r requirements.txt
+
+# install sndfile library
+RUN apt-get update \
+    && apt-get install libportaudio2 libportaudiocpp0 portaudio19-dev libsndfile1-dev -y \
+    && pip install pyaudio
 
 COPY . .

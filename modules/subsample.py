@@ -6,8 +6,8 @@ import torch.nn.functional as F
 
 
 class VggSubsample(nn.Module):
-    """Convolutional subsampling which supports VGGNet and striding approach introduced in:
-    VGGNet Subsampling: https://arxiv.org/pdf/1910.12977.pdf
+    """Causal Vgg subsampling introduced in https://arxiv.org/pdf/1910.12977.pdf
+
     Args:
         subsampling_factor (int): The subsampling factor which should be a power of 2
         feat_in (int): size of the input features
@@ -39,7 +39,7 @@ class VggSubsample(nn.Module):
                     out_channels=conv_channels,
                     kernel_size=self.kernel_size,
                     stride=1,
-                    padding=0 if i == 0 else 1,
+                    padding=0 if i == 0 else 1,  # first padding is added manually
                 )
             )
             layers.append(activation)
@@ -78,20 +78,13 @@ class VggSubsample(nn.Module):
             + 1
         )
 
-    def forward(self, x, lengths, cache=None):
+    def forward(self, x, lengths):
         """
-
-        x (torch.Tensor): [B, Tmax, D]
-        cache (torch.Tensor): [B, self.left_padding, D] Cached partial audio input of
-            previous segment. Only used in streaming inference.
-
+        Args:
+            x (torch.Tensor): [B, Tmax, D]
         """
         # 1. add padding to make this causal convolution
-        if cache is None:
-            x = F.pad(x, (1, 1, self.left_padding, 0))
-        else:
-            x = torch.cat([cache, x], dim=1)
-            x = F.pad(x, (1, 1, 0, 0))
+        x = F.pad(x, (1, 1, self.left_padding, 0))
 
         # 2. forward
         x = x.unsqueeze(1)
@@ -109,9 +102,11 @@ class VggSubsample(nn.Module):
         return x, new_lengths
 
 
-def stack_subsample(audio_signal, lengths, stack_length):
-    bs, t_max, idim = audio_signal.shape
-    t_new = math.ceil(t_max / stack_length)
-    audio_signal = audio_signal.contiguous().view(bs, t_new, idim * stack_length)
-    lengths = torch.ceil(lengths / stack_length).int()
-    return audio_signal, lengths
+def stack_subsample(audio_signals, audio_lens, subsampling_factor):
+    bs, t_max, idim = audio_signals.shape
+    t_new = math.ceil(t_max / subsampling_factor)
+    audio_signals = audio_signals.contiguous().view(
+        bs, t_new, idim * subsampling_factor
+    )
+    audio_lens = torch.ceil(audio_lens / subsampling_factor).int()
+    return audio_signals, audio_lens

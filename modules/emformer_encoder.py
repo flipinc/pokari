@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from modules.subsample import VggSubsample
+from modules.subsample import VggSubsample, stack_subsample
 
 
 class EmformerEncoder(nn.Module):
@@ -27,10 +27,12 @@ class EmformerEncoder(nn.Module):
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
+        self.num_heads = num_heads
         self.num_layers = num_layers
         self.left_length = left_length
         self.chunk_length = chunk_length
         self.right_length = right_length
+        self.dim_model = dim_model
 
         feat_out = int(dim_model / subsampling_factor)
         if dim_model % subsampling_factor > 0:
@@ -48,8 +50,8 @@ class EmformerEncoder(nn.Module):
         self.layers = nn.ModuleList()
         for i in range(self.num_layers):
             layer = EmformerBlock(
-                num_heads=num_heads,
-                dim_model=dim_model,
+                num_heads=self.num_heads,
+                dim_model=self.dim_model,
                 dim_ffn=dim_ffn,
                 dropout_attn=dropout_attn,
                 left_length=self.left_length,
@@ -58,7 +60,25 @@ class EmformerEncoder(nn.Module):
             )
             self.layers.append(layer)
 
-    def create_mask(self, input_lens, t_max, device):
+    def create_padding_mask(self, audio_lens, segment_length, device):
+        bs = audio_lens.size(0)
+        mask = torch.zeros(bs, segment_length, segment_length + self.left_length).to(
+            device
+        )
+
+        # TODO: if cache_k and cache_v is not given, there is no point of attending
+        # to the left chunk
+        # TODO: there should be a way to parallelize this
+        for i in range(bs):
+            max_len = int(audio_lens[i])
+            mask[i, :, max_len + self.left_length :] = 0
+            mask[i, max_len:, :] = 0
+
+        mask = mask.unsqueeze(1)
+
+        return mask == 0
+
+    def create_mask(self, audio_lens, t_max, device):
         """Emformer attention mask
 
         There are four types of masks.
@@ -70,12 +90,12 @@ class EmformerEncoder(nn.Module):
         Note: Only used during training.
 
         Args:
-            input_lens (torch.Tensor): [B]
-            t_max (int): this cannot be inferred by input_lens because longest input_len
+            audio_lens (torch.Tensor): [B]
+            t_max (int): this cannot be inferred by audio_lens because longest input_len
                 may be padded for efficiency
             device (torch.device)
         """
-        bs = input_lens.size(0)
+        bs = audio_lens.size(0)
         num_chunks = math.ceil(t_max / self.chunk_length)
 
         mask_body = torch.zeros(bs, t_max, t_max)
@@ -86,35 +106,35 @@ class EmformerEncoder(nn.Module):
         total_right_length = 0
         for i in range(num_chunks):
             # 1. mark diagnal and left chunks
-            left_index = (
+            left_offset = (
                 self.chunk_length * i - self.left_length
                 if (self.chunk_length * i - self.left_length) >= 0
                 else 0
             )
-            chunk_start = self.chunk_length * i
-            chunk_end = (
+            start_offset = self.chunk_length * i
+            end_offset = (
                 self.chunk_length * (i + 1)
                 if self.chunk_length * (i + 1) <= t_max
                 else t_max
             )
-            mask_body[:, chunk_start:chunk_end, left_index:chunk_end] = 1
+            mask_body[:, start_offset:end_offset, left_offset:end_offset] = 1
 
             # last segment does not have right context
             if i == (num_chunks - 1):
                 break
 
             # 2. hard copy right contexts
-            remaining_space = t_max - (chunk_end + self.right_length)
+            remaining_space = t_max - (end_offset + self.right_length)
             if remaining_space >= 0:
                 this_right_length = self.right_length
             elif remaining_space < 0:
-                this_right_length = t_max - chunk_end
+                this_right_length = t_max - end_offset
 
-            right_indexes.extend(range(chunk_end, chunk_end + this_right_length))
+            right_indexes.extend(range(end_offset, end_offset + this_right_length))
 
             mask_left[
                 :,
-                chunk_start : chunk_start + self.chunk_length,
+                start_offset : start_offset + self.chunk_length,
                 i * self.right_length : i * self.right_length + this_right_length,
             ] = 1
             total_right_length += this_right_length
@@ -131,7 +151,7 @@ class EmformerEncoder(nn.Module):
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
         for i in range(bs):
-            max_len = int(input_lens[i])
+            max_len = int(audio_lens[i])
 
             # 4.1 pad mask_body
             mask_body[i, :, max_len:] = 0
@@ -156,43 +176,41 @@ class EmformerEncoder(nn.Module):
 
         return (mask == 0).to(device), right_indexes
 
-    def recognize(
-        self, audio_signal, length, cache_q=None, cache_v=None, cache_audio=None
-    ):
+    def stream(self, audio_signals, audio_lens, cache_k=None, cache_v=None):
         # 1. projection
-        audio_signal = audio_signal.transpose(1, 2)
-        audio_signal = self.linear(audio_signal)
+        x = audio_signals.transpose(1, 2)
+        x = self.linear(x)
 
         # 2. vgg subsampling
         if self.subsampling == "stack":
-            bs, t_max, idim = audio_signal.shape
-            t_new = math.ceil(t_max / self.subsampling_factor)
-            audio_signal = audio_signal.contiguous().view(
-                bs, t_new, idim * self.subsampling_factor
-            )
-            length = torch.ceil(length / self.subsampling_factor).int()
+            x, audio_lens = stack_subsample(x, audio_lens, self.subsampling_factor)
         elif self.subsampling == "vgg":
-            cache = audio_signal[:, -self.subsample.left_padding :, :]
-            audio_signal, length = self.subsample(audio_signal, length, cache_audio)
-            cache_audio = cache
-            del cache
+            x, audio_lens = self.subsample(x, audio_lens)
+
+        # 3. create padding mask
+        segment_length = x.size(1)
+        mask = self.create_padding_mask(audio_lens, segment_length, x.device)
 
         # 3. loop over layers while saving cache at the same time
-        if not cache_q:
-            num_layers = len(self.layers)
-            cache_q = cache_v = [None] * num_layers
+        if cache_k is None or cache_v is None:
+            bs = audio_signals.size(0)
+            cache_k = cache_v = [
+                torch.zeros(
+                    bs,
+                    self.left_length,
+                    self.num_heads,
+                    self.dim_model // self.num_heads,
+                ).to(audio_signals.device)
+            ] * self.num_layers
 
-        output = audio_signal
         for i, layer in enumerate(self.layers):
-            output, (cache_q[i], cache_v[i]) = layer.recognize(
-                output, cache_q[i], cache_v[i]
-            )
+            x, (cache_k[i], cache_v[i]) = layer.stream(x, mask, cache_k[i], cache_v[i])
 
         # 4. Trim right context
-        output = output[:, : self.chunk_length, :].transpose(1, 2)
-        length = torch.IntTensor([output.size(2)])
+        x = x[:, : self.chunk_length, :].transpose(1, 2)
+        audio_lens = torch.IntTensor([x.size(2)] * x.size(0))
 
-        return output, length, cache_q, cache_v, cache_audio
+        return x, audio_lens, cache_k, cache_v
 
     def forward(self, audio_signals, audio_lens):
         """
@@ -214,29 +232,28 @@ class EmformerEncoder(nn.Module):
 
         # 2. subsampling
         if self.subsampling == "stack":
-            bs, t_max, idim = x.shape
-            t_new = math.ceil(t_max / self.subsampling_factor)
-            x = x.contiguous().view(bs, t_new, idim * self.subsampling_factor)
-            audio_lens = torch.ceil(audio_lens / self.subsampling_factor).int()
+            x, audio_lens = stack_subsample(
+                audio_signals, audio_lens, self.subsampling_factor
+            )
         elif self.subsampling == "vgg":
             x, audio_lens = self.subsample(x, audio_lens)
-            t_new = x.size(1)
 
         # 3. create attention mask
+        t_new = x.size(1)
         mask, right_indexes = self.create_mask(audio_lens, t_new, x.device)
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
-        output = torch.cat([x[:, right_indexes, :], x], dim=1)
+        x = torch.cat([x[:, right_indexes, :], x], dim=1)
 
         # 5. loop over layers.
         for layer in self.layers:
-            output = layer(output, mask)
+            x = layer(x, mask)
 
         # 6. Trim copied right context
-        output = output[:, len(right_indexes) :, :].transpose(1, 2)
+        x = x[:, len(right_indexes) :, :].transpose(1, 2)
 
-        return output, audio_lens
+        return x, audio_lens
 
 
 class EmformerBlock(nn.Module):
@@ -272,7 +289,38 @@ class EmformerBlock(nn.Module):
         self.linear_out_1 = nn.Linear(dim_model, dim_ffn)
         self.linear_out_2 = nn.Linear(dim_ffn, dim_model)
 
-    def recognize(self, input, cache_k=None, cache_v=None):
+    def attend(self, input, q, k, v, mask):
+        bs = q.size(0)
+
+        # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
+
+        # 2. apply mask and softmax
+        dtype = np.float16 if attn_scores.dtype == torch.float16 else np.float32
+        attn_scores = attn_scores.masked_fill(mask, np.finfo(dtype).min)
+        attn_probs = torch.softmax(attn_scores, dim=-1).masked_fill(mask, 0.0)
+        attn_probs = self.attn_dropout(attn_probs)
+
+        # 3. attend and add residual
+        output = torch.matmul(attn_probs, v)
+        output = (
+            output.transpose(1, 2).contiguous().view(bs, -1, self.num_heads * self.d_k)
+        )
+        attn_out = output + input
+
+        # 4. layer norm
+        output = self.ln_out_1(attn_out)
+
+        # 5. feed forward and add residual
+        output = self.linear_out_1(output)
+        output = self.linear_out_2(output) + attn_out
+
+        # 6. layer norm
+        output = self.ln_out_2(output)
+
+        return output
+
+    def stream(self, input, mask, cache_k=None, cache_v=None):
         """
         Note: At inference time, the notion of Left, Chunk, Right contexts still exists
             because without them, the compatibility with training will be lost.
@@ -281,55 +329,36 @@ class EmformerBlock(nn.Module):
             This must be the case for inference too.
 
         Args:
-            input (torch.Tensor): [1, C+R, D]
-            cache_k (torch.Tensor): [1, H, L, D/H]
-            cache_v (torch.Tensor): [1, H, L, D/H]
+            input (torch.Tensor): [B, C+R, D]
+            cache_k (torch.Tensor): [B, H, L, D/H]
+            cache_v (torch.Tensor): [B, H, L, D/H]
         """
-        # 0. layer norm
+        bs = input.size(0)
+
+        # 1. apply layer norm
         input = self.ln_in(input)
 
-        # 1. calculate q -> [B, H, C+R, D]
-        q = self.linear_q(input).view(1, -1, self.num_heads, self.d_k)
+        # 2. calculate q -> [B, H, C+R, D]
+        q = self.linear_q(input).view(bs, -1, self.num_heads, self.d_k)
         q = q.transpose(1, 2)
 
-        # 2. calculate k and v -> [B, H, L+C+R, D]
-        k_cr = self.linear_k(input).view(1, -1, self.num_heads, self.d_k)
-        k = k_cr if cache_k is None else torch.cat([cache_k, k_cr], dim=1)
+        # 3. calculate k and v -> [B, H, L+C+R, D]
+        k_cr = self.linear_k(input).view(bs, -1, self.num_heads, self.d_k)
         # we need to include previous cache as left length can extend beyond chunk.
+        k = torch.cat([cache_k, k_cr], dim=1)
         cache_k = k[
-            :, -(self.left_length + self.right_length) : self.right_length, :, :
+            :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
         k = k.transpose(1, 2)
 
-        v_cr = self.linear_v(input).view(1, -1, self.num_heads, self.d_k)
-        v = v_cr if cache_v is None else torch.cat([cache_v, v_cr], dim=1)
+        v_cr = self.linear_v(input).view(bs, -1, self.num_heads, self.d_k)
+        v = torch.cat([cache_v, v_cr], dim=1)
         cache_v = v[
-            :, -(self.left_length + self.right_length) : self.right_length, :, :
+            :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
         v = v.transpose(1, 2)
 
-        # 3. get attention score -> [B, H, C+R, L+C+R]
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
-
-        # 4. softmax, and get attention probability
-        attn_probs = torch.softmax(attn_scores, dim=-1)
-
-        # 5. attend and add residual -> [B, H, C+R, D]
-        output = torch.matmul(attn_probs, v)
-        output = (
-            output.transpose(1, 2).contiguous().view(1, -1, self.num_heads * self.d_k)
-        )
-        attn_out = output + input
-
-        # 6. layernorm
-        output = self.ln_out_1(attn_out)
-
-        # 7. feed forward and add residual
-        output = self.linear_out_1(output)
-        output = self.linear_out_2(output) + attn_out
-
-        # 8. layernorm
-        output = self.ln_out_2(output)
+        output = self.attend(input, q, k, v, mask)
 
         return output, (cache_k, cache_v)
 
@@ -347,7 +376,7 @@ class EmformerBlock(nn.Module):
             torch.Tensor: [B, Total_R+Tmax, D]
         """
 
-        bs, t_max, _ = input.shape
+        bs = input.size(0)
 
         # 1. perform layer norm
         input = self.ln_in(input)
@@ -360,30 +389,6 @@ class EmformerBlock(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        # 3. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
-
-        # 4. apply mask and softmax
-        dtype = np.float16 if attn_scores.dtype == torch.float16 else np.float32
-        attn_scores = attn_scores.masked_fill(mask, np.finfo(dtype).min)
-        attn_probs = torch.softmax(attn_scores, dim=-1).masked_fill(mask, 0.0)
-        attn_probs = self.attn_dropout(attn_probs)
-
-        # 5. attend and add residual
-        output = torch.matmul(attn_probs, v)
-        output = (
-            output.transpose(1, 2).contiguous().view(bs, -1, self.num_heads * self.d_k)
-        )
-        attn_out = output + input
-
-        # 6. layer norm
-        output = self.ln_out_1(attn_out)
-
-        # 7. feed forward and add residual
-        output = self.linear_out_1(output)
-        output = self.linear_out_2(output) + attn_out
-
-        # 8. layer norm
-        output = self.ln_out_2(output)
+        output = self.attend(input, q, k, v, mask)
 
         return output
