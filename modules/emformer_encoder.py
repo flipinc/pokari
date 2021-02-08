@@ -191,7 +191,7 @@ class EmformerEncoder(nn.Module):
         segment_length = x.size(1)
         mask = self.create_padding_mask(audio_lens, segment_length, x.device)
 
-        # 3. loop over layers while saving cache at the same time
+        # 4. loop over layers while saving cache at the same time
         if cache_k is None or cache_v is None:
             bs = audio_signals.size(0)
             cache_k = cache_v = [
@@ -206,7 +206,7 @@ class EmformerEncoder(nn.Module):
         for i, layer in enumerate(self.layers):
             x, (cache_k[i], cache_v[i]) = layer.stream(x, mask, cache_k[i], cache_v[i])
 
-        # 4. Trim right context
+        # 5. Trim right context
         x = x[:, : self.chunk_length, :].transpose(1, 2)
         audio_lens = torch.IntTensor([x.size(2)] * x.size(0))
 

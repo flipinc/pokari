@@ -378,7 +378,7 @@ class GreedyInference(nn.Module):
                     for kidx, ki in enumerate(k):
                         # this does not work for tracing
                         # if blank_mask[kidx] == 0:
-                        if not torch.is_nonzero(is_zero(blank_mask, kidx)):
+                        if torch.is_nonzero(is_zero(blank_mask, kidx)):
                             label[kidx].append(ki)
 
                     symbols_added += 1
