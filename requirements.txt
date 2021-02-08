@@ -16,3 +16,4 @@ torch-stft
 pytest
 inflect
 onnxruntime
+numpy

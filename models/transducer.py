@@ -12,6 +12,7 @@ from frontends.audio_augment import get_augmentations
 from hydra.utils import instantiate
 from losses.transducer import TransducerLoss
 from metrics.wer import TransducerWER
+from modules.stream import get_stream
 from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
 from optimizers.lr_scheduler import compute_max_steps
@@ -52,6 +53,8 @@ class Transducer(pl.LightningModule):
             log_prediction=True,
             dist_sync_on_step=True,
         )
+
+        self.stream = get_stream(self.preprocessor, self.encoder.self.decoder)
 
         optim_cfg = OmegaConf.to_container(cfg.optimizer, resolve=True)
 
@@ -205,8 +208,7 @@ class Transducer(pl.LightningModule):
 
                         num_chunks = math.ceil(t / pre_chunk_length)
 
-                        cache_rnn_state = None
-                        cache_k = cache_v = None
+                        cache = None
                         for i in range(num_chunks):
                             start_offset = pre_chunk_length * i
                             end_offset = (
@@ -223,19 +225,12 @@ class Transducer(pl.LightningModule):
 
                             end_offset = end_offset + this_right_length
 
-                            (
-                                current_hypotheses,
-                                cache_k,
-                                cache_v,
-                                cache_rnn_state,
-                            ) = self.emformer_stream(
+                            current_hypotheses, cache = self.stream(
                                 audio_signals=audio_signals[:, start_offset:end_offset],
                                 audio_lens=torch.Tensor([end_offset - start_offset]).to(
                                     device
                                 ),
-                                cache_rnn_state=cache_rnn_state,
-                                cache_k=cache_k,
-                                cache_v=cache_v,
+                                cache=cache,
                             )
 
                             hypotheses += current_hypotheses
@@ -245,47 +240,6 @@ class Transducer(pl.LightningModule):
             # set mode back to its original value
             self.train(mode=is_training)
         return hypotheses
-
-    def emformer_stream(
-        self,
-        audio_signals,
-        audio_lens=None,
-        cache_rnn_state=None,
-        cache_k=None,
-        cache_v=None,
-    ):
-        if audio_lens is None:
-            bs = audio_signals.size(0)
-            # assuming all audio_signal has segment length (chunk length + right length)
-            base_length = self.preprocessor.hop_length * self.encoder.subsampling_factor
-
-            chunk_length = base_length * self.encoder.chunk_length
-            right_length = base_length * self.encoder.right_length
-
-            audio_lens = torch.Tensor([chunk_length + right_length] * bs).to(
-                audio_signals.device
-            )
-
-        audio_signals, audio_lens = self.preprocessor(
-            audio_signals=audio_signals,
-            audio_lens=audio_lens,
-        )
-
-        encoded_signals, encoded_lens, cache_k, cache_v = self.encoder.stream(
-            audio_signals=audio_signals,
-            audio_lens=audio_lens,
-            cache_k=cache_k,
-            cache_v=cache_v,
-        )
-
-        current_hypotheses, cache_rnn_state = self.decoder.generate_hypotheses(
-            encoded_signals,
-            encoded_lens,
-            cache_rnn_state,
-            mode="stream",
-        )
-
-        return current_hypotheses, cache_k, cache_v, cache_rnn_state
 
     def setup_dataloader_from_config(self, cfg: DictConfig):
         augmentor = get_augmentations(cfg["augmentor"]) if "augmentor" in cfg else None
@@ -320,19 +274,15 @@ class Transducer(pl.LightningModule):
     def forward(
         self,
         audio_signals,
-        # when streaming for the first iteration, audio_lens is unknown
         audio_lens=None,
         transcripts=None,
         transcript_lens=None,
         mode="normal",
-        cache_rnn_state=None,
-        # for emformer
-        cache_k=None,
-        cache_v=None,
+        cache=None,
     ):
         # TODO: Because ONNX only supports forward() for inference, streaming code is
-        # forcefully included. This makes this code messy as the output is completely
-        # different.
+        # included in forward function. This makes this code messy as the output is
+        # completely different.
         if mode == "normal":
             audio_signals, audio_lens = self.preprocessor(
                 audio_signals=audio_signals,
@@ -369,24 +319,13 @@ class Transducer(pl.LightningModule):
 
                 try:
                     self.eval()
-
-                    (
-                        current_hypotheses,
-                        cache_k,
-                        cache_v,
-                        cache_rnn_state,
-                    ) = self.emformer_stream(
-                        audio_signals=audio_signals,
-                        audio_lens=audio_lens,
-                        cache_k=cache_k,
-                        cache_v=cache_v,
-                        cache_rnn_state=cache_rnn_state,
+                    out = self.stream(
+                        audio_signals=audio_signals, audio_lens=audio_lens, cache=cache
                     )
-
                 finally:
                     self.train(mode=is_training)
 
-            return current_hypotheses, audio_lens, cache_k, cache_v, cache_rnn_state
+            return out
 
     def training_step(self, batch, batch_idx):
         audio_signals, audio_lens, transcripts, transcript_lens = batch

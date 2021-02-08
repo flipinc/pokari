@@ -11,7 +11,7 @@ trainer:
   resume_from_checkpoint: null
   distributed_backend: ddp
   progress_bar_refresh_rate: 20 # for google colab
-  default_root_dir: ./drive/MyDrive/jynote/emformer # for google colab
+  default_root_dir: ./outputs # for google colab
 
 model:
   labels:
@@ -47,7 +47,7 @@ model:
     ]
 
   train_ds:
-    manifest_filepath: ./drive/MyDrive/jynote/manifest_train.json # for google colab
+    manifest_filepath: ../datasets/manifest_train.json # for google colab
     sample_rate: 16000
     batch_size: 4
     max_duration: null
@@ -63,7 +63,7 @@ model:
         resample_type: kaiser_fast
 
   validation_ds:
-    manifest_filepath: ./drive/MyDrive/jynote/manifest_val.json # for google colab
+    manifest_filepath: ../datasets/manifest_val.json # for google colab
     sample_rate: 16000
     batch_size: 4
     shuffle: false
