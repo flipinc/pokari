@@ -33,9 +33,9 @@ class TestEmformer:
         t_max = 10  # padded length
         input_len = 7  # actual length
 
-        input_lens = torch.Tensor([input_len])
+        audio_lens = torch.Tensor([input_len])
         mask, right_indexes = model.create_mask(
-            input_lens=input_lens, t_max=t_max, device=input_lens.device
+            audio_lens=audio_lens, t_max=t_max, device=audio_lens.device
         )
 
         # 1. number of copied right indexes should match.
@@ -66,10 +66,10 @@ class TestEmformer:
         assert torch.sum(mask[0, 0, 8:11, 6:11] == 0) == 15  # with left context
         assert torch.sum(mask[0, 0, 11:14, 9:14] == 0) == 3  # padding
 
-    def test_padding():
-        # the output of timestep that corresponds to paddding is zero
+    def test_padding(self):
+        # the portion of emformer output that corresponds to paddding is zero
         assert 1 == 1
 
-    def test_left_context_attn():
+    def test_left_context_attn(self):
         # value of left context attn at training and inference time should be the same
         assert 1 == 1
