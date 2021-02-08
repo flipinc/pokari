@@ -1,5 +1,6 @@
 {
-    "python.pythonPath": "/Users/26keisuke/opt/miniconda3/envs/double-t/bin/python",
+    // change next line to your environment
+    "python.pythonPath": "/home/keisuke26/anaconda3/envs/pokari/bin/python",
     "python.linting.enabled": true,
     "python.linting.pylintEnabled": false,
     "python.linting.flake8Enabled": true,

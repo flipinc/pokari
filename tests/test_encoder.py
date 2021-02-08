@@ -3,11 +3,13 @@ from hydra.utils import instantiate
 from modules.emformer_encoder import EmformerEncoder
 from omegaconf import OmegaConf
 
+subsampling_factor = 4
+
 cfg = OmegaConf.create(
     {
         "_target_": "modules.emformer_encoder.EmformerEncoder",
         "subsampling": "vgg",
-        "subsampling_factor": 4,
+        "subsampling_factor": subsampling_factor,
         "subsampling_dim": 256,
         "feat_in": 80,
         "num_layers": 16,
@@ -65,11 +67,3 @@ class TestEmformer:
         assert torch.sum(mask[0, 0, 5:8, 5:8] == 0) == 9  # without left context
         assert torch.sum(mask[0, 0, 8:11, 6:11] == 0) == 15  # with left context
         assert torch.sum(mask[0, 0, 11:14, 9:14] == 0) == 3  # padding
-
-    def test_padding(self):
-        # the portion of emformer output that corresponds to paddding is zero
-        assert 1 == 1
-
-    def test_left_context_attn(self):
-        # value of left context attn at training and inference time should be the same
-        assert 1 == 1

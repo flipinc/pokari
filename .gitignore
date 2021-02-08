@@ -9,4 +9,6 @@ outputs
 
 # sphinx related
 docs/_build/doctrees
+
+# others
 .DS_Store
