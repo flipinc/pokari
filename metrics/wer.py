@@ -96,9 +96,7 @@ class TransducerWER(Metric):
                 reference = self.decoder.decode_tokens_to_str(target)
                 references.append(reference)
 
-            hypotheses, _ = self.decoder.generate_hypotheses(
-                encoder_output, encoded_lengths
-            )
+            hypotheses, _ = self.decoder(encoder_output, encoded_lengths)
 
         if self.log_prediction:
             logging.info("\n")

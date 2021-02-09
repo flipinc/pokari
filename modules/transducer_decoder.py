@@ -1,11 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import torch
+import torch.nn as nn
 
-from modules.greedy_inference import GreedyInference, Hypothesis, NBestHypotheses
 
-
-class TransducerDecoder(object):
+class TransducerDecoder(nn.Module):
     """
     Used for performing RNN-T auto-regressive decoding of the Decoder+Joint
     network given the encoder state.
@@ -17,26 +16,20 @@ class TransducerDecoder(object):
         be used for decoding.
     """
 
-    def __init__(self, predictor, joint, labels):
+    def __init__(self, labels, inference):
         super().__init__()
 
         self.blank_id = len(labels)
         self.labels_map = dict([(i, labels[i]) for i in range(len(labels))])
+        self.inference = inference
 
-        self.infer = GreedyInference(
-            predictor=predictor,
-            joint=joint,
-            blank_index=self.blank_id,
-            max_symbols_per_step=30,
-        )
-
-    def generate_hypotheses(
+    def forward(
         self,
         encoder_output: torch.Tensor,
         encoded_lengths: torch.Tensor,
-        cache_rnn_state=None,
-        mode="normal",
-    ) -> (List[str], Optional[List[List[str]]]):
+        cache_rnn_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        mode: str = "full_context",
+    ) -> Tuple[List[str], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         """
         Decode an encoder output by autoregressive decoding of the Decoder+Joint
         networks.
@@ -61,38 +54,19 @@ class TransducerDecoder(object):
                     list of all the hypotheses of the model per sample.
                     Look at rnnt_utils.NBestHypotheses for more information.
         """
-        # Compute hypotheses
         with torch.no_grad():
-            hypotheses_list, cache_rnn_state = self.infer(
+            hypotheses_list, cache_rnn_state = self.inference(
                 encoder_output=encoder_output,
                 encoded_lengths=encoded_lengths,
                 cache_rnn_state=cache_rnn_state,
                 mode=mode,
             )
 
-            # extract the hypotheses
-            hypotheses_list: List[Hypothesis] = hypotheses_list[0]
+        hypotheses = self.decode_hypothesis(hypotheses_list)
 
-        if mode == "stream":
-            return hypotheses_list, cache_rnn_state
+        return hypotheses, cache_rnn_state
 
-        if isinstance(hypotheses_list[0], NBestHypotheses):
-            hypotheses = []
-            all_hypotheses = []
-            for nbest_hyp in hypotheses_list:  # type: NBestHypotheses
-                n_hyps = (
-                    nbest_hyp.n_best_hypotheses
-                )  # Extract all hypotheses for this sample
-                decoded_hyps = self.decode_hypothesis(n_hyps)  # type: List[str]
-                hypotheses.append(decoded_hyps[0])  # best hypothesis
-                all_hypotheses.append(decoded_hyps)
-
-            return hypotheses, all_hypotheses
-        else:
-            hypotheses = self.decode_hypothesis(hypotheses_list)  # type: List[str]
-            return hypotheses, cache_rnn_state
-
-    def decode_hypothesis(self, hypotheses_list: List[Hypothesis]) -> List[str]:
+    def decode_hypothesis(self, hypotheses_list: List[torch.Tensor]) -> List[str]:
         """
         Decode a list of hypotheses into a list of strings.
 
@@ -102,20 +76,20 @@ class TransducerDecoder(object):
         Returns:
             A list of strings.
         """
-        hypotheses = []
+        hypotheses: List[str] = []
         for ind in range(len(hypotheses_list)):
             # Extract the integer encoded hypothesis
-            prediction = hypotheses_list[ind].y_sequence
-
-            if type(prediction) != list:
-                prediction = prediction.tolist()
+            prediction = hypotheses_list[ind]
 
             # RNN-T sample level is already preprocessed by implicit CTC decoding
             # Simply remove any blank tokens
-            prediction = [p for p in prediction if p != self.blank_id]
+            prediction_wo_blank: List[int] = []
+            for idx, p in enumerate(prediction):
+                if p != self.blank_id:
+                    prediction_wo_blank.append(p.item())
 
             # De-tokenize the integer tokens
-            hypothesis = self.decode_tokens_to_str(prediction)
+            hypothesis = self.decode_tokens_to_str(prediction_wo_blank)
             hypotheses.append(hypothesis)
 
         return hypotheses
@@ -130,5 +104,9 @@ class TransducerDecoder(object):
         Returns:
             A decoded string.
         """
-        hypothesis = "".join([self.labels_map[c] for c in tokens if c != self.blank_id])
-        return hypothesis
+        hypothesis: List[str] = []
+        for c in tokens:
+            if c != self.blank_id:
+                hypothesis.append(self.labels_map[c])
+
+        return "".join(hypothesis)

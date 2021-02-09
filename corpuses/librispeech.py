@@ -3,9 +3,8 @@ import os
 
 
 def create_manifest(
-    path_to_libri="drive/MyDrive/jynote/LibriSpeech",
-    kind="train-clean-100",
-    out_dir="drive/MyDrive/jynote",
+    path_to_dataset="/workspace/datasets/train/train-clean-100",
+    out_dir="/workspace/datasets",
     out_file="manifest_train.json",
 ):
     """
@@ -19,22 +18,25 @@ def create_manifest(
     - orig_sr # None by default. This can be inferred by librosa.
 
     """
-    root = os.path.join(path_to_libri, kind)
-
     with open(os.path.join(out_dir, out_file), "w") as out:
 
-        for speaker in os.listdir(root):
+        for speaker in os.listdir(path_to_dataset):
             if not speaker.endswith(".DS_Store"):
 
-                for topic in os.listdir(os.path.join(root, speaker)):
+                for topic in os.listdir(os.path.join(path_to_dataset, speaker)):
                     if not topic.endswith(".DS_Store"):
 
-                        for content in os.listdir(os.path.join(root, speaker, topic)):
+                        for content in os.listdir(
+                            os.path.join(path_to_dataset, speaker, topic)
+                        ):
                             if not content.endswith(".DS_Store"):
                                 if content.endswith(".txt"):
 
                                     with open(
-                                        os.path.join(root, speaker, topic, content), "r"
+                                        os.path.join(
+                                            path_to_dataset, speaker, topic, content
+                                        ),
+                                        "r",
                                     ) as txt_file:
                                         lines = [
                                             line.rstrip()
@@ -49,7 +51,7 @@ def create_manifest(
                                                 {
                                                     "id": id,
                                                     "audio_filepath": os.path.join(
-                                                        root,
+                                                        path_to_dataset,
                                                         speaker,
                                                         topic,
                                                         f"{id}.flac",
@@ -61,3 +63,12 @@ def create_manifest(
                                                 out,
                                             )
                                             out.write("\n")
+
+
+if __name__ == "__main__":
+    create_manifest()
+    # create_manifest(
+    #     path_to_dataset="/workspace/datasets/dev/dev-clean",
+    #     out_dir="/workspace/datasets",
+    #     out_file="manifest_val.json",
+    # )

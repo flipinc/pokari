@@ -55,7 +55,7 @@ model:
     shuffle: true
     num_workers: 4
     pin_memory: true
-    normalize_transcripts: true # text to lowercase
+    normalize_transcripts: false # lowercase
     augmentor:
       speed:
         prob: 1.0
@@ -69,7 +69,7 @@ model:
     shuffle: false
     num_workers: 4
     pin_memory: false
-    normalize_transcripts: true
+    normalize_transcripts: false
 
   preprocessor:
     _target_: frontends.audio_preprocess.AudioToMelSpectrogramPreprocessor
@@ -82,6 +82,13 @@ model:
     pad_to: 16
     stft_exact_pad: true
     stft_conv: true
+
+  inference:
+    _target_: modules.greedy_inference.GreedyInference
+    max_symbols_per_step: 30
+
+  stream:
+    _target_: modules.stream.EmformerStream
 
   spec_augment:
     _target_: frontends.spec_augment.SpectrogramAugmentation
