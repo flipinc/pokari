@@ -1,63 +1,109 @@
 import math
 
 import librosa
+import numpy as np
 import torch
 import torch.nn as nn
-from torch_stft import STFT
+from librosa.util import pad_center
+from scipy.signal import get_window
 
 from frontends.audio_augment import AudioAugmentor
 from frontends.audio_segment import AudioSegment
 
 
-def normalize_batch(x, seq_len, normalize_type):
-    """Normalize audio signal"""
+class STFT(nn.Module):
+    """From https://github.com/pseeth/pytorch-stft"""
 
-    CONSTANT = 1e-6
+    def __init__(
+        self, filter_length=1024, hop_length=512, win_length=None, window="hann"
+    ):
+        """
+        This module implements an STFT using 1D convolution and 1D transpose
+        convolutions. This is a bit tricky so there are some cases that probably
+        won't work as working out the same sizes before and after in all overlap
+        add setups is tough. Right now, this code should work with hop lengths that
+        are half the filter length (50% overlap between frames).
 
-    if normalize_type == "per_feature":
-        x_mean = torch.zeros(
-            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+        Keyword Arguments:
+            filter_length {int} -- Length of filters used (default: {1024})
+            hop_length {int} -- Hop length of STFT (restrict to 50% overlap between
+                frames) (default: {512})
+            win_length {[type]} -- Length of the window function applied to each frame
+                (if not specified, it equals the filter length). (default: {None})
+            window {str} -- Type of window to use (options are bartlett, hann, hamming,
+                blackman, blackmanharris) (default: {'hann'})
+        """
+        super().__init__()
+        self.filter_length = filter_length
+        self.hop_length = hop_length
+        self.win_length = win_length if win_length else filter_length
+        self.window = window
+        self.forward_transform = None
+        self.pad_amount = int(self.filter_length / 2)
+        scale = self.filter_length / self.hop_length
+        fourier_basis = np.fft.fft(np.eye(self.filter_length))
+
+        cutoff = int((self.filter_length / 2 + 1))
+        fourier_basis = np.vstack(
+            [np.real(fourier_basis[:cutoff, :]), np.imag(fourier_basis[:cutoff, :])]
         )
-        x_std = torch.zeros(
-            (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+        forward_basis = torch.FloatTensor(fourier_basis[:, None, :])
+        inverse_basis = torch.FloatTensor(
+            np.linalg.pinv(scale * fourier_basis).T[:, None, :]
         )
-        for i in range(x.shape[0]):
-            if x[i, :, : seq_len[i]].shape[1] == 1:
-                raise ValueError(
-                    "normalize_batch with `per_feature` normalize_type "
-                    "received a tensor of length 1. This will result in "
-                    "torch.std() returning nan"
-                )
-            x_mean[i, :] = x[i, :, : seq_len[i]].mean(dim=1)
-            x_std[i, :] = x[i, :, : seq_len[i]].std(dim=1)
-        # make sure x_std is not zero
-        x_std += CONSTANT
-        return (x - x_mean.unsqueeze(2)) / x_std.unsqueeze(2)
-    elif normalize_type == "all_features":
-        x_mean = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
-        x_std = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
-        for i in range(x.shape[0]):
-            x_mean[i] = x[i, :, : seq_len[i]].mean()
-            x_std[i] = x[i, :, : seq_len[i]].std()
-        # make sure x_std is not zero
-        x_std += CONSTANT
-        return (x - x_mean.view(-1, 1, 1)) / x_std.view(-1, 1, 1)
-    elif "fixed_mean" in normalize_type and "fixed_std" in normalize_type:
-        x_mean = torch.tensor(normalize_type["fixed_mean"], device=x.device)
-        x_std = torch.tensor(normalize_type["fixed_std"], device=x.device)
-        return (x - x_mean.view(x.shape[0], x.shape[1]).unsqueeze(2)) / x_std.view(
-            x.shape[0], x.shape[1]
-        ).unsqueeze(2)
-    else:
-        return x
 
+        assert filter_length >= self.win_length
+        # get window and zero center pad it to filter_length
+        fft_window = get_window(window, self.win_length, fftbins=True)
+        fft_window = pad_center(fft_window, filter_length)
+        fft_window = torch.from_numpy(fft_window).float()
 
-class STFTPatch(STFT):
+        # window the bases
+        forward_basis *= fft_window
+        inverse_basis *= fft_window
+
+        self.register_buffer("forward_basis", forward_basis.float())
+        self.register_buffer("inverse_basis", inverse_basis.float())
+
     def forward(self, input_data):
-        return super().transform(input_data)[0]
+        """Take input data (audio) to STFT domain.
+
+        Arguments:
+            input_data {tensor} -- Tensor of floats, with shape (num_batch, num_samples)
+
+        Returns:
+            magnitude {tensor} -- Magnitude of STFT with shape (num_batch,
+                num_frequencies, num_frames)
+            phase {tensor} -- Phase of STFT with shape (num_batch,
+                num_frequencies, num_frames)
+        """
+        num_batches = input_data.shape[0]
+        num_samples = input_data.shape[-1]
+
+        # similar to librosa, reflect-pad the input
+        input_data = input_data.view(num_batches, 1, num_samples)
+
+        input_data = torch.nn.functional.pad(
+            input_data.unsqueeze(1),
+            (self.pad_amount, self.pad_amount, 0, 0),
+            mode="reflect",
+        )
+        input_data = input_data.squeeze(1)
+
+        forward_transform = torch.nn.functional.conv1d(
+            input_data, self.forward_basis, stride=self.hop_length, padding=0
+        )
+
+        cutoff = int((self.filter_length / 2) + 1)
+        real_part = forward_transform[:, :cutoff, :]
+        imag_part = forward_transform[:, cutoff:, :]
+
+        magnitude = torch.sqrt(real_part ** 2 + imag_part ** 2)
+
+        return magnitude
 
 
-class STFTExactPad(STFTPatch):
+class STFTExactPad(STFT):
     """Adapted from Prem Seetharaman's https://github.com/pseeth/pytorch-stft"""
 
     def __init__(self, *params, **kw_params):
@@ -151,9 +197,7 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
                     self.n_fft, self.hop_length, self.win_length, window
                 )
             else:
-                self.stft = STFTPatch(
-                    self.n_fft, self.hop_length, self.win_length, window
-                )
+                self.stft = STFT(self.n_fft, self.hop_length, self.win_length, window)
         else:
             torch_windows = {
                 "hann": torch.hann_window,
@@ -237,6 +281,42 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         else:
             return torch.ceil(seq_len / self.hop_length).to(dtype=torch.long)
 
+    def normalize_batch(self, x, seq_len, normalize_type: str):
+        """Normalize audio signal"""
+
+        CONSTANT = 1e-6
+
+        if normalize_type == "per_feature":
+            x_mean = torch.zeros(
+                (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+            )
+            x_std = torch.zeros(
+                (seq_len.shape[0], x.shape[1]), dtype=x.dtype, device=x.device
+            )
+            for i in range(x.shape[0]):
+                if x[i, :, : seq_len[i]].shape[1] == 1:
+                    raise ValueError(
+                        "normalize_batch with `per_feature` normalize_type "
+                        "received a tensor of length 1. This will result in "
+                        "torch.std() returning nan"
+                    )
+                x_mean[i, :] = x[i, :, : seq_len[i]].mean(dim=1)
+                x_std[i, :] = x[i, :, : seq_len[i]].std(dim=1)
+            # make sure x_std is not zero
+            x_std += CONSTANT
+            return (x - x_mean.unsqueeze(2)) / x_std.unsqueeze(2)
+        elif normalize_type == "all_features":
+            x_mean = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
+            x_std = torch.zeros(seq_len.shape, dtype=x.dtype, device=x.device)
+            for i in range(x.shape[0]):
+                x_mean[i] = x[i, :, : seq_len[i]].mean()
+                x_std[i] = x[i, :, : seq_len[i]].std()
+            # make sure x_std is not zero
+            x_std += CONSTANT
+            return (x - x_mean.view(-1, 1, 1)) / x_std.view(-1, 1, 1)
+        else:
+            return x
+
     @torch.no_grad()
     def forward(self, audio_signals, audio_lens):
         x = audio_signals
@@ -260,8 +340,9 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
             )
 
         # disable autocast to get full range of stft values
-        with torch.cuda.amp.autocast(enabled=False):
-            x = self.stft(x)
+        # when compiling to torchscript, comment the following line
+        # with torch.cuda.amp.autocast(enabled=False):
+        x = self.stft(x)
 
         # torch returns real, imag; so convert to magnitude
         if not self.stft_conv:
@@ -284,8 +365,8 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
                 raise ValueError("log_zero_guard_type was not understood")
 
         # normalize if required
-        if self.normalize:
-            x = normalize_batch(x, audio_lens, normalize_type=self.normalize)
+        if self.normalize is not None:
+            x = self.normalize_batch(x, audio_lens, normalize_type=self.normalize)
 
         # mask to zero any values beyond audio_lens in batch, pad to multiple of
         # `pad_to` (for efficiency)
@@ -293,17 +374,14 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         mask = torch.arange(max_len).to(x.device)
         mask = mask.expand(x.size(0), max_len) >= audio_lens.unsqueeze(1)
         x = x.masked_fill(
-            mask.unsqueeze(1).type(torch.bool).to(device=x.device), self.pad_value
+            mask.unsqueeze(1).to(dtype=torch.bool, device=x.device), self.pad_value
         )
         del mask
-        pad_to = self.pad_to
-        if pad_to == "max":
-            x = nn.functional.pad(
-                x, (0, self.max_length - x.size(-1)), value=self.pad_value
-            )
-        elif pad_to > 0:
-            pad_amt = x.size(-1) % pad_to
+        if self.pad_to > 0:
+            pad_amt = x.size(-1) % self.pad_to
             if pad_amt != 0:
-                x = nn.functional.pad(x, (0, pad_to - pad_amt), value=self.pad_value)
+                x = torch.nn.functional.pad(
+                    x, (0, self.pad_to - pad_amt), value=float(self.pad_value)
+                )
 
         return x, audio_lens

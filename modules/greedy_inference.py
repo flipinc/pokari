@@ -1,42 +1,7 @@
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
-
-from modules.lstm import label_collate
-
-
-@dataclass
-class Hypothesis:
-    """Hypothesis class for beam search algorithms.
-
-    score: A float score obtained from an AbstractRNNTDecoder module's
-        score_hypothesis method.
-
-    y_sequence: Either a sequence of integer ids pointing to some vocabulary, or a
-        packed torch.Tensor behaving in the same manner. dtype must be torch.Long
-        in the latter case.
-
-    dec_state: A list (or list of list) of LSTM-RNN decoder states. Can be None.
-
-    y: (Unused) A list of torch.Tensors representing the list of hypotheses.
-
-    lm_state: (Unused) A dictionary state cache used by an external Language Model.
-
-    lm_scores: (Unused) Score of the external Language Model.
-    """
-
-    score: float
-    y_sequence: Union[List[int], torch.Tensor]
-    dec_state: Optional[Union[List[List[torch.Tensor]], List[torch.Tensor]]] = None
-
-
-@dataclass
-class NBestHypotheses:
-    """List of N best hypotheses"""
-
-    n_best_hypotheses: Optional[List[Hypothesis]]
 
 
 class GreedyInference(nn.Module):
@@ -72,11 +37,11 @@ class GreedyInference(nn.Module):
     @torch.no_grad()
     def _pred_step(
         self,
-        label: Union[torch.Tensor, int],
-        state: Optional[List[torch.Tensor]],
+        label: Optional[torch.Tensor],
+        state: Optional[Tuple[torch.Tensor, torch.Tensor]],
         add_sos: bool = False,
         batch_size: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ):
         """
         Common prediction step based on the AbstractRNNTDecoder implementation.
 
@@ -99,19 +64,15 @@ class GreedyInference(nn.Module):
             if label.dtype != torch.long:
                 label = label.long()
 
+            # output: [B, 1, K]
+            return self.predictor.predict(
+                label, state, add_sos=add_sos, batch_size=batch_size
+            )
+
         else:
-            # Label is an integer
-            if label == self._SOS:
-                return self.predictor.predict(
-                    None, state, add_sos=add_sos, batch_size=batch_size
-                )
-
-            label = label_collate([[label]])
-
-        # output: [B, 1, K]
-        return self.predictor.predict(
-            label, state, add_sos=add_sos, batch_size=batch_size
-        )
+            return self.predictor.predict(
+                None, state, add_sos=add_sos, batch_size=batch_size
+            )
 
     @torch.no_grad()
     def _joint_step(self, enc, pred, log_normalize: Optional[bool] = None):
@@ -142,8 +103,8 @@ class GreedyInference(nn.Module):
         self,
         encoder_output: torch.Tensor,
         encoded_lengths: torch.Tensor,
-        cache_rnn_state=None,
-        mode="normal",
+        cache_rnn_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        mode: str = "full_context",
     ):
         """Returns a list of hypotheses given an input batch of the encoder hidden embedding.
         Output token is generated auto-repressively.
@@ -156,99 +117,24 @@ class GreedyInference(nn.Module):
         Returns:
             packed list containing batch number of sentences (Hypotheses).
         """
-        # Preserve decoder and joint training state
-        predictor_training_state = self.predictor.training
-        joint_training_state = self.joint.training
-
         with torch.no_grad():
+            # TODO: need to set joint and predictor to eval mode
+            # currently, torchscript gives error when calling eval() or training(False)
+
             # Apply optional preprocessing
             encoder_output = encoder_output.transpose(1, 2)  # (B, T, D)
             logitlen = encoded_lengths
 
-            self.predictor.eval()
-            self.joint.eval()
+            inseq = encoder_output  # [B, T, D]
+            hypotheses, cache_rnn_state = self._greedy_batch_decode(
+                inseq, logitlen, device=inseq.device
+            )
 
-            with self.predictor.as_frozen(), self.joint.as_frozen():
-                inseq = encoder_output  # [B, T, D]
-                hypotheses = self._greedy_batch_decode(
-                    inseq, logitlen, device=inseq.device
-                )
-
-            if mode == "stream":
-                return (hypotheses,), cache_rnn_state
-
-            # Pack the hypotheses results
-            packed_result = [
-                Hypothesis(y_sequence=torch.tensor(sent, dtype=torch.long), score=-1.0)
-                for sent in hypotheses
+            hypotheses_list = [
+                torch.tensor(sent, dtype=torch.long) for sent in hypotheses
             ]
 
-            del hypotheses
-
-        self.predictor.train(predictor_training_state)
-        self.joint.train(joint_training_state)
-
-        return (packed_result,), cache_rnn_state
-
-    @torch.no_grad()
-    def _greedy_decode(
-        self, x: torch.Tensor, out_len: torch.Tensor, cache_rnn_state=None
-    ):
-        """Greedy Decode for batch size = 1. Currently not used"""
-
-        # x: [T, 1, D]
-        # out_len: [seq_len]
-
-        # Initialize blank state and empty label set
-        label = []
-
-        # For timestep t in X_t
-        for time_idx in range(out_len):
-            # Extract encoder embedding at timestep t
-            # f = x[time_idx, :, :].unsqueeze(0)  # [1, 1, D]
-            f = x.narrow(dim=0, start=time_idx, length=1)
-
-            # Setup exit flags and counter
-            not_blank = True
-            symbols_added = 0
-
-            # While blank is not predicted, or we dont run out of max symbols per
-            # timestep
-            while not_blank and (
-                self.max_symbols is None or symbols_added < self.max_symbols
-            ):
-                # In the first timestep, we initialize the network with RNNT Blank
-                # In later timesteps, we provide previous predicted label as input.
-                last_label = self._SOS if label == [] else label[-1]
-
-                # Perform prediction network and joint network steps.
-                g, cache_rnn_state_prime = self._pred_step(last_label, cache_rnn_state)
-                logp = self._joint_step(f, g, log_normalize=None)[0, 0, 0, :]
-
-                del g
-
-                # torch.max(0) op doesnt exist for FP 16.
-                if logp.dtype != torch.float32:
-                    logp = logp.float()
-
-                # get index k, of max prob
-                v, k = logp.max(0)
-                k = k.item()  # K is the label at timestep t_s in inner loop, s >= 0.
-
-                del logp
-
-                # If blank token is predicted, exit inner loop, move onto next timestep
-                if k == self._blank_index:
-                    not_blank = False
-                else:
-                    # Append token to label set, update RNN state.
-                    label.append(k)
-                    cache_rnn_state = cache_rnn_state_prime
-
-                # Increment token counter.
-                symbols_added += 1
-
-        return label, cache_rnn_state
+        return hypotheses_list, cache_rnn_state
 
     @torch.no_grad()
     def _greedy_batch_decode(
@@ -259,7 +145,7 @@ class GreedyInference(nn.Module):
         # device: torch.device
 
         # Initialize state
-        hidden = None
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
         batchsize = x.shape[0]
 
         # Output string buffer
@@ -280,7 +166,7 @@ class GreedyInference(nn.Module):
         )
 
         # Get max sequence length
-        max_out_len = out_len.max()
+        max_out_len = int(out_len.max())
 
         for time_idx in range(max_out_len):
             f = x.narrow(dim=1, start=time_idx, length=1)  # [B, 1, D]
@@ -309,7 +195,7 @@ class GreedyInference(nn.Module):
                 # the state
                 if time_idx == 0 and symbols_added == 0:
                     g, hidden_prime = self._pred_step(
-                        self._SOS, hidden, batch_size=batchsize
+                        None, hidden, batch_size=batchsize
                     )
                 else:
                     # Perform batch step prediction of decoder, getting new states and
@@ -325,33 +211,24 @@ class GreedyInference(nn.Module):
                     logp = logp.float()
 
                 # Get index k, of max prob for batch
-                v, k = logp.max(1)
-                del v, g, logp
+                _, k = logp.max(1)
 
                 # Update blank mask with current predicted blanks
                 # This is accumulating blanks over all time steps T and all target
                 # steps min(max_symbols, U)
                 k_is_blank = (k == self._blank_index).to(blank_mask.device)
-                # ideally this op should be inplace(bitwise_or_) but trace jit does
-                # not support it.
-                # blank_mask.bitwise_or_(k_is_blank.to(blank_mask.device))
-                blank_mask = blank_mask | k_is_blank
-
-                del k_is_blank
+                blank_mask.bitwise_or_(k_is_blank)
 
                 # If all samples predict / have predicted prior blanks, exit loop early
                 # This is equivalent to if single sample predicted k
-                result = is_all_one(blank_mask)
-
-                # this does not work for tracing
-                # if blank_mask.all():
-                if torch.is_nonzero(result):
+                if blank_mask.all():
                     not_blank = False
                 else:
                     # Collect batch indices where blanks occurred now/past
-                    blank_indices = []
+                    blank_indices = torch.empty(0).to(dtype=torch.long)
                     if hidden is not None:
-                        blank_indices = (blank_mask == 1).nonzero(as_tuple=False)
+                        # as_tuple=False does not work for torchscript
+                        blank_indices = (blank_mask == 1).nonzero()
 
                     # Recover prior state for all samples which predicted blank now/past
                     if hidden is not None:
@@ -376,14 +253,12 @@ class GreedyInference(nn.Module):
                     # once they have occured (normally stopping condition of sample
                     # level loop).
                     for kidx, ki in enumerate(k):
-                        # this does not work for tracing
-                        # if blank_mask[kidx] == 0:
-                        if torch.is_nonzero(is_zero(blank_mask, kidx)):
+                        if blank_mask[kidx] == 0:
                             label[kidx].append(ki)
 
                     symbols_added += 1
 
-        return label
+        return label, hidden
 
 
 @torch.jit.script

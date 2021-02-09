@@ -10,29 +10,23 @@ cfg = compose(config_name="emformer_librispeech_char.yaml")
 
 def main():
     trainer = pl.Trainer(**cfg.trainer)
-    model = Transducer.load_from_checkpoint(
-        "drive/MyDrive/jynote/emformer/lightning_logs/version_5/"
-        "checkpoints/epoch=3-step=28539.ckpt",
-        cfg=cfg.model,
-        trainer=trainer,
-    ).cuda()
+    model = Transducer(cfg=cfg.model, trainer=trainer, return_torchscript=True).cuda()
+    # model = Transducer.load_from_checkpoint(
+    #     "../datasets/epoch=3-step=28539.ckpt",
+    #     cfg=cfg.model,
+    #     trainer=trainer,
+    # ).cuda()
 
     print(
         model.simulate(
-            [
-                "drive/MyDrive/jynote/LibriSpeech/train-clean-100"
-                "/19/198/19-198-0003.flac"
-            ],
+            ["../datasets/train/train-clean-100" "/1034/121119/1034-121119-0022.flac"],
             1,
             "stream",
         )
     )
     print(
         model.simulate(
-            [
-                "drive/MyDrive/jynote/LibriSpeech/train-clean-100"
-                "/19/198/19-198-0003.flac"
-            ],
+            ["../datasets/train/train-clean-100" "/1034/121119/1034-121119-0022.flac"],
             1,
         )
     )
@@ -42,14 +36,13 @@ def main():
     cache_rnn_state = torch.randn(2, 1, 2, 320).cuda()
     cache_k = torch.randn(16, 2, 20, 8, 64).cuda()  # 2.6MB
     cache_v = torch.randn(16, 2, 20, 8, 64).cuda()  # 2.6MB
+    cache = (cache_rnn_state, cache_k, cache_v)
 
     out = model(
         audio_signals=audio_signals,
         audio_lens=audio_lens,
         mode="stream",
-        cache_rnn_state=cache_rnn_state,
-        cache_k=cache_k,
-        cache_v=cache_v,
+        cache=cache,
     )
 
     torch.onnx.export(
@@ -60,21 +53,13 @@ def main():
             "",
             "",
             "stream",
-            cache_rnn_state,
-            cache_k,
-            cache_v,
+            cache,
         ),
         "emformer.onnx",
-        input_names=[
-            "audio_signals",
-            "audio_lens",
-            "cache_rnn_state",
-            "cache_k",
-            "cache_v",
-        ],
-        output_names=["hypothesis", "cache_rnn_state", "cache_k", "cache_v"],
+        input_names=["audio_signals", "audio_lens", "cache"],
+        output_names=["hypothesis", "cache"],
         example_outputs=out,
-        opset_version=11,
+        opset_version=12,
     )
 
 

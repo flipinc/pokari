@@ -65,13 +65,13 @@ class VggSubsample(nn.Module):
 
         in_length = feat_in
         for i in range(self.sampling_num):
-            out_length = self.calc_length(int(in_length))
+            out_length = self.calc_length(in_length)
             in_length = out_length
 
         self.out = torch.nn.Linear(conv_channels * out_length, feat_out)
         self.conv = torch.nn.Sequential(*layers)
 
-    def calc_length(self, in_length):
+    def calc_length(self, in_length: int):
         return math.ceil(
             (int(in_length) + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
             / float(self.pool_stride)
@@ -94,15 +94,16 @@ class VggSubsample(nn.Module):
 
         # 3. calculate new length
         # TODO: improve the performance of length calculation
-        new_lengths = lengths
         for i in range(self.sampling_num):
-            new_lengths = [self.calc_length(int(length)) for length in new_lengths]
+            for idx, length in enumerate(lengths):
+                lengths[idx] = self.calc_length(length)
 
-        new_lengths = torch.IntTensor(new_lengths).to(lengths.device)
-        return x, new_lengths
+        return x, lengths
 
 
-def stack_subsample(audio_signals, audio_lens, subsampling_factor):
+def stack_subsample(
+    audio_signals: torch.Tensor, audio_lens: torch.Tensor, subsampling_factor: int
+):
     bs, t_max, idim = audio_signals.shape
     t_new = math.ceil(t_max / subsampling_factor)
     audio_signals = audio_signals.contiguous().view(

@@ -1,6 +1,6 @@
 import math
+from typing import Optional
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -10,18 +10,18 @@ from modules.subsample import VggSubsample, stack_subsample
 class EmformerEncoder(nn.Module):
     def __init__(
         self,
-        subsampling,
-        subsampling_factor,
-        subsampling_dim,
-        feat_in,
-        num_layers,
-        num_heads,
-        dim_model,
-        dim_ffn,
-        dropout_attn,
-        left_length,
-        chunk_length,
-        right_length,
+        subsampling: str,
+        subsampling_factor: int,
+        subsampling_dim: int,
+        feat_in: int,
+        num_layers: int,
+        num_heads: int,
+        dim_model: int,
+        dim_ffn: int,
+        dropout_attn: int,
+        left_length: int,
+        chunk_length: int,
+        right_length: int,
     ):
         super().__init__()
 
@@ -60,7 +60,9 @@ class EmformerEncoder(nn.Module):
             )
             self.layers.append(layer)
 
-    def create_padding_mask(self, audio_lens, segment_length, device):
+    def create_stream_mask(
+        self, audio_lens: torch.Tensor, segment_length: int, device: torch.device
+    ):
         bs = audio_lens.size(0)
         mask = torch.zeros(bs, segment_length, segment_length + self.left_length).to(
             device
@@ -78,7 +80,7 @@ class EmformerEncoder(nn.Module):
 
         return mask == 0
 
-    def create_mask(self, audio_lens, t_max, device):
+    def create_mask(self, audio_lens: torch.Tensor, t_max: int, device: torch.device):
         """Emformer attention mask
 
         There are four types of masks.
@@ -102,7 +104,7 @@ class EmformerEncoder(nn.Module):
         # TODO: this is allocating more than what is actually required
         mask_left = torch.zeros(bs, t_max, (num_chunks - 1) * self.right_length)
 
-        right_indexes = []
+        right_indexes = torch.empty(0).to(dtype=torch.long)
         total_right_length = 0
         for i in range(num_chunks):
             # 1. mark diagnal and left chunks
@@ -127,10 +129,15 @@ class EmformerEncoder(nn.Module):
             remaining_space = t_max - (end_offset + self.right_length)
             if remaining_space >= 0:
                 this_right_length = self.right_length
-            elif remaining_space < 0:
+            else:
                 this_right_length = t_max - end_offset
 
-            right_indexes.extend(range(end_offset, end_offset + this_right_length))
+            right_indexes = torch.cat(
+                [
+                    right_indexes,
+                    torch.arange(end_offset, end_offset + this_right_length),
+                ]
+            )
 
             mask_left[
                 :,
@@ -157,7 +164,7 @@ class EmformerEncoder(nn.Module):
             mask_body[i, :, max_len:] = 0
             mask_body[i, max_len:, :] = 0
 
-            to_be_padded = torch.nonzero(torch.Tensor(right_indexes) >= max_len)
+            to_be_padded = torch.nonzero(right_indexes >= max_len)
             if to_be_padded.size(0) > 0:
                 pad_begin_index = int(to_be_padded[0])
 
@@ -176,7 +183,16 @@ class EmformerEncoder(nn.Module):
 
         return (mask == 0).to(device), right_indexes
 
-    def stream(self, audio_signals, audio_lens, cache_k=None, cache_v=None):
+    def stream(
+        self,
+        audio_signals: torch.Tensor,
+        audio_lens: torch.Tensor,
+        cache_k: Optional[torch.Tensor] = None,
+        cache_v: Optional[torch.Tensor] = None,
+    ):
+        # TODO: check all audio_lens are equal if batch size is > 1
+        bs = audio_signals.size(0)
+
         # 1. projection
         x = audio_signals.transpose(1, 2)
         x = self.linear(x)
@@ -189,43 +205,37 @@ class EmformerEncoder(nn.Module):
 
         # 3. create padding mask
         segment_length = x.size(1)
-        mask = self.create_padding_mask(audio_lens, segment_length, x.device)
+        mask = self.create_stream_mask(audio_lens, segment_length, x.device)
 
         # 4. loop over layers while saving cache at the same time
         if cache_k is None or cache_v is None:
             bs = audio_signals.size(0)
-            cache_k = cache_v = [
-                torch.zeros(
-                    bs,
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                ).to(audio_signals.device)
-            ] * self.num_layers
+            # alternatively, this can be a list of size [B, L, Head, Dim] x num_layer
+            # but for simplicity, everything is packed in torch.tensor
+            cache_k = cache_v = torch.zeros(
+                self.num_layers,
+                bs,
+                self.left_length,
+                self.num_heads,
+                self.dim_model // self.num_heads,
+            ).to(audio_signals.device)
 
         for i, layer in enumerate(self.layers):
-            x, (cache_k[i], cache_v[i]) = layer.stream(x, mask, cache_k[i], cache_v[i])
+            x, cache = layer(x, mask, cache_k[i], cache_v[i], mode="stream")
+            # this is always true. this is for torchscript typing
+            if cache is not None:
+                (cache_k[i], cache_v[i]) = cache
+            else:
+                raise ValueError("cache value for should be returned.")
 
         # 5. Trim right context
         x = x[:, : self.chunk_length, :].transpose(1, 2)
-        audio_lens = torch.IntTensor([x.size(2)] * x.size(0))
+        for i in range(bs):
+            audio_lens[i] = x.size(2)
 
         return x, audio_lens, cache_k, cache_v
 
-    def forward(self, audio_signals, audio_lens):
-        """
-
-        D_1: number of mels. This number has to match D_2 after frame stacking
-        D_2: encoder dim.
-
-        Args:
-            audio_signals (torch.Tensor): [B, D_1, Tmax]
-            audio_lens (torch.Tensor): [B]
-
-        Returns:
-            torch.Tensor: [B, D_2, Tmax]
-        """
-
+    def full_context(self, audio_signals: torch.Tensor, audio_lens: torch.Tensor):
         # 1. projection
         x = audio_signals.transpose(1, 2)
         x = self.linear(x)
@@ -248,24 +258,52 @@ class EmformerEncoder(nn.Module):
 
         # 5. loop over layers.
         for layer in self.layers:
-            x = layer(x, mask)
+            x, _ = layer(x, mask)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :].transpose(1, 2)
 
-        return x, audio_lens
+        return x, audio_lens, None, None
+
+    def forward(
+        self,
+        audio_signals: torch.Tensor,
+        audio_lens: torch.Tensor,
+        cache_k: Optional[torch.Tensor] = None,
+        cache_v: Optional[torch.Tensor] = None,
+        mode: str = "full_context",
+    ):
+        """
+
+        D_1: number of mels. This number has to match D_2 after frame stacking
+        D_2: encoder dim.
+
+        Args:
+            audio_signals (torch.Tensor): [B, D_1, Tmax]
+            audio_lens (torch.Tensor): [B]
+
+        Returns:
+            torch.Tensor: [B, D_2, Tmax]
+        """
+
+        if mode == "full_context":
+            return self.full_context(audio_signals, audio_lens)
+        elif mode == "stream":
+            return self.stream(audio_signals, audio_lens, cache_k, cache_v)
+        else:
+            raise ValueError(f"Invalid mode {mode}")
 
 
 class EmformerBlock(nn.Module):
     def __init__(
         self,
-        num_heads,
-        dim_model,
-        dim_ffn,
-        dropout_attn,
-        left_length,
-        chunk_length,
-        right_length,
+        num_heads: int,
+        dim_model: int,
+        dim_ffn: int,
+        dropout_attn: int,
+        left_length: int,
+        chunk_length: int,
+        right_length: int,
     ):
         super().__init__()
 
@@ -289,15 +327,21 @@ class EmformerBlock(nn.Module):
         self.linear_out_1 = nn.Linear(dim_model, dim_ffn)
         self.linear_out_2 = nn.Linear(dim_ffn, dim_model)
 
-    def attend(self, input, q, k, v, mask):
+    def attend(
+        self,
+        input: torch.Tensor,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        mask: torch.Tensor,
+    ):
         bs = q.size(0)
 
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
         attn_scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
 
         # 2. apply mask and softmax
-        dtype = np.float16 if attn_scores.dtype == torch.float16 else np.float32
-        attn_scores = attn_scores.masked_fill(mask, np.finfo(dtype).min)
+        attn_scores = attn_scores.masked_fill(mask, float("-inf"))
         attn_probs = torch.softmax(attn_scores, dim=-1).masked_fill(mask, 0.0)
         attn_probs = self.attn_dropout(attn_probs)
 
@@ -320,7 +364,13 @@ class EmformerBlock(nn.Module):
 
         return output
 
-    def stream(self, input, mask, cache_k=None, cache_v=None):
+    def stream(
+        self,
+        input: torch.Tensor,
+        mask: torch.Tensor,
+        cache_k: torch.Tensor,
+        cache_v: torch.Tensor,
+    ):
         """
         Note: At inference time, the notion of Left, Chunk, Right contexts still exists
             because without them, the compatibility with training will be lost.
@@ -328,10 +378,12 @@ class EmformerBlock(nn.Module):
             by the input of t_0, t_1, t_2 PLUS right contexts.
             This must be the case for inference too.
 
+        N: number of layers
+
         Args:
             input (torch.Tensor): [B, C+R, D]
-            cache_k (torch.Tensor): [B, H, L, D/H]
-            cache_v (torch.Tensor): [B, H, L, D/H]
+            cache_k (torch.Tensor): [N, B, H, L, D/H]
+            cache_v (torch.Tensor): [N, B, H, L, D/H]
         """
         bs = input.size(0)
 
@@ -362,20 +414,7 @@ class EmformerBlock(nn.Module):
 
         return output, (cache_k, cache_v)
 
-    def forward(self, input, mask):
-        """
-
-        N: number of chunks
-        R: number of right contexts in one chunk
-
-        Args:
-            input (torch.Tensor): [B, Total_R+Tmax, D]
-            mask (torch.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
-
-        Returns:
-            torch.Tensor: [B, Total_R+Tmax, D]
-        """
-
+    def full_context(self, input: torch.Tensor, mask: torch.Tensor):
         bs = input.size(0)
 
         # 1. perform layer norm
@@ -391,4 +430,41 @@ class EmformerBlock(nn.Module):
 
         output = self.attend(input, q, k, v, mask)
 
-        return output
+        return output, None
+
+    def forward(
+        self,
+        input: torch.Tensor,
+        mask: torch.Tensor,
+        cache_k: Optional[torch.Tensor] = None,
+        cache_v: Optional[torch.Tensor] = None,
+        mode: str = "full_context",
+    ):
+        """
+
+        N: number of chunks
+        R: number of right contexts in one chunk
+
+        Args:
+            input (torch.Tensor): [B, Total_R+Tmax, D]
+            mask (torch.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
+
+        Returns:
+            torch.Tensor: [B, Total_R+Tmax, D]
+        """
+
+        if mode == "full_context":
+            return self.full_context(input, mask)
+        elif mode == "stream":
+            if cache_k is None or cache_v is None:
+                bs = input.size(0)
+                cache_k = cache_v = torch.zeros(
+                    bs,
+                    self.left_length,
+                    self.num_heads,
+                    self.d_k,
+                ).to(input.device)
+
+            return self.stream(input, mask, cache_k, cache_v)
+        else:
+            raise ValueError(f"Invalid mode {mode}")

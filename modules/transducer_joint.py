@@ -1,11 +1,8 @@
-from typing import List, Optional, Union
-
 import torch
+import torch.nn as nn
 
-from modules.base_module import BaseModule
 
-
-class TransducerJoint(BaseModule):
+class TransducerJoint(nn.Module):
     """A Recurrent Neural Network Transducer Joint Network (RNN-T Joint Network).
     An RNN-T Joint network, comprised of a feedforward model.
 
@@ -45,8 +42,8 @@ class TransducerJoint(BaseModule):
     def forward(
         self,
         encoder_outputs: torch.Tensor,
-        predictor_outputs: Optional[torch.Tensor],
-    ) -> Union[torch.Tensor, List[Optional[torch.Tensor]]]:
+        predictor_outputs: torch.Tensor,
+    ) -> torch.Tensor:
         # encoder = (B, D, T)
         # decoder = (B, D, U)
         encoder_outputs = encoder_outputs.transpose(1, 2)  # (B, T, D)
@@ -102,7 +99,9 @@ class TransducerJoint(BaseModule):
 
         inp = f + g  # [B, T, U, H]
 
-        del f, g
+        # torch script does not support del with multiples targets
+        del f
+        del g
 
         res = self.joint_net(inp)  # [B, T, U, V + 1]
 

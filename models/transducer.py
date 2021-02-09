@@ -3,7 +3,7 @@ import logging
 import math
 import os
 import tempfile
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pytorch_lightning as pl
 import torch
@@ -12,17 +12,22 @@ from frontends.audio_augment import get_augmentations
 from hydra.utils import instantiate
 from losses.transducer import TransducerLoss
 from metrics.wer import TransducerWER
-from modules.stream import get_stream
 from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
 from optimizers.lr_scheduler import compute_max_steps
 
 
+def to_torchscript(module):
+    return torch.jit.script(module)
+
+
 class Transducer(pl.LightningModule):
     """Lightning Module for Transducer models."""
 
-    def __init__(self, cfg: DictConfig, trainer: pl.Trainer):
+    def __init__(self, cfg: DictConfig, trainer: pl.Trainer, return_torchscript=False):
         super().__init__()
+
+        convert = to_torchscript if return_torchscript is True else lambda x: x
 
         self.labels = cfg.labels
 
@@ -33,19 +38,40 @@ class Transducer(pl.LightningModule):
         self.preprocessor = instantiate(cfg.preprocessor)
         self.spec_augment = instantiate(cfg.spec_augment)
 
-        self.encoder = instantiate(cfg.encoder)
-        self.predictor = instantiate(cfg.predictor, vocab_size=len(self.labels))
-        self.joint = instantiate(
-            cfg.joint,
-            encoder_hidden=cfg.encoder.dim_model,
-            predictor_hidden=cfg.predictor.dim_model,
-            vocab_size=len(self.labels),
+        self.encoder = convert(instantiate(cfg.encoder))
+        self.predictor = convert(
+            instantiate(cfg.predictor, vocab_size=len(self.labels))
+        )
+
+        self.joint = convert(
+            instantiate(
+                cfg.joint,
+                encoder_hidden=cfg.encoder.dim_model,
+                predictor_hidden=cfg.predictor.dim_model,
+                vocab_size=len(self.labels),
+            )
+        )
+
+        self.inference = convert(
+            instantiate(
+                cfg.inference,
+                predictor=self.predictor,
+                joint=self.joint,
+                blank_index=len(self.labels),
+            )
+        )
+        self.decoder = convert(
+            TransducerDecoder(labels=self.labels, inference=self.inference)
+        )
+
+        self.stream = instantiate(
+            cfg.stream,
+            preprocessor=self.preprocessor,
+            encoder=self.encoder,
+            decoder=self.decoder,
         )
 
         self.loss = TransducerLoss(vocab_size=len(self.labels))
-        self.decoder = TransducerDecoder(
-            predictor=self.predictor, joint=self.joint, labels=self.labels
-        )
         self.wer = TransducerWER(
             decoder=self.decoder,
             batch_dim_index=0,
@@ -53,8 +79,6 @@ class Transducer(pl.LightningModule):
             log_prediction=True,
             dist_sync_on_step=True,
         )
-
-        self.stream = get_stream(self.preprocessor, self.encoder.self.decoder)
 
         optim_cfg = OmegaConf.to_container(cfg.optimizer, resolve=True)
 
@@ -126,7 +150,7 @@ class Transducer(pl.LightningModule):
 
     @torch.no_grad()
     def simulate(
-        self, paths2audio_files: List[str], batch_size: int = 4, mode="normal"
+        self, paths2audio_files: List[str], batch_size: int = 4, mode="full_context"
     ) -> List[str]:
         """
         Uses greedy decoding to transcribe audio files. Use this method for debugging
@@ -175,20 +199,18 @@ class Transducer(pl.LightningModule):
                     audio_signals = test_batch[0].to(device)
                     audio_lens = test_batch[1].to(device)
 
-                    if mode == "normal":
+                    if mode == "full_context":
                         audio_signals, audio_lens = self.preprocessor(
                             audio_signals=audio_signals,
                             audio_lens=audio_lens,
                         )
 
-                        encoded_signals, encoded_lens = self.encoder(
+                        encoded_signals, encoded_lens, _, _ = self.encoder(
                             audio_signals=audio_signals,
                             audio_lens=audio_lens,
                         )
 
-                        hypotheses += self.decoder.generate_hypotheses(
-                            encoded_signals, encoded_lens
-                        )[0]
+                        hypotheses += self.decoder(encoded_signals, encoded_lens)[0]
                     elif mode == "stream":
                         t = audio_signals.size(1)
 
@@ -277,13 +299,13 @@ class Transducer(pl.LightningModule):
         audio_lens=None,
         transcripts=None,
         transcript_lens=None,
-        mode="normal",
-        cache=None,
+        mode="full_context",
+        cache: Tuple[torch.Tensor, ...] = None,
     ):
         # TODO: Because ONNX only supports forward() for inference, streaming code is
         # included in forward function. This makes this code messy as the output is
         # completely different.
-        if mode == "normal":
+        if mode == "full_context":
             audio_signals, audio_lens = self.preprocessor(
                 audio_signals=audio_signals,
                 audio_lens=audio_lens,
@@ -292,7 +314,7 @@ class Transducer(pl.LightningModule):
             if self.training:
                 audio_signals = self.spec_augment(audio_signals=audio_signals)
 
-            encoded_signals, encoded_lens = self.encoder(
+            encoded_signals, encoded_lens, _, _ = self.encoder(
                 audio_signals=audio_signals, audio_lens=audio_lens
             )
             del audio_signals, audio_lens
@@ -320,7 +342,9 @@ class Transducer(pl.LightningModule):
                 try:
                     self.eval()
                     out = self.stream(
-                        audio_signals=audio_signals, audio_lens=audio_lens, cache=cache
+                        audio_signals=audio_signals,
+                        audio_lens=audio_lens,
+                        cache=cache,
                     )
                 finally:
                     self.train(mode=is_training)

@@ -1,12 +1,12 @@
-from typing import List, Optional
+from typing import Optional, Tuple
 
 import torch
+import torch.nn as nn
 
-from modules.base_module import BaseModule
 from modules.lstm import label_collate, rnn
 
 
-class TransducerPredictor(BaseModule):
+class TransducerPredictor(nn.Module):
     """Transducer Prediction Network comprised of a stateful LSTM model.
 
     Args:
@@ -79,7 +79,16 @@ class TransducerPredictor(BaseModule):
             dropout=dropout,
         )
 
-    def forward(self, targets, target_lens, states=None):
+        # torchscript does not support next(self.parameters()). this is
+        # a workaround
+        self.dummy_param = nn.Parameter(torch.empty(0))
+
+    def forward(
+        self,
+        targets,
+        target_lens,
+        states: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ):
         # y: (B, U)
         y = label_collate(targets)
 
@@ -93,10 +102,10 @@ class TransducerPredictor(BaseModule):
     def predict(
         self,
         y: Optional[torch.Tensor] = None,
-        state: Optional[List[torch.Tensor]] = None,
+        state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         add_sos: bool = True,
         batch_size: Optional[int] = None,
-    ) -> (torch.Tensor, List[torch.Tensor]):
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Stateful prediction of scores and state for a (possibly null) tokenset.
         This method takes various cases into consideration :
@@ -148,13 +157,13 @@ class TransducerPredictor(BaseModule):
 
         """
         # Get device and dtype of current module
-        _p = next(self.parameters())
-        device = _p.device
-        dtype = _p.dtype
+        device = self.dummy_param.device
+        dtype = self.dummy_param.dtype
 
         # If y is not None, it is of shape [B, U] with dtype long.
         if y is not None:
-            if y.device != device:
+            # torchscript does not allow y.device != device
+            if not y.device == device:
                 y = y.to(device)
 
             # (B, U) -> (B, U, H)
@@ -188,10 +197,13 @@ class TransducerPredictor(BaseModule):
         g, hid = self.rnn(y, state)
         g = g.transpose(0, 1)  # (B, U + 1, H)
 
-        del y, start, state
+        # torchscript does not support del with more than one keyword
+        del y
+        del start
+        del state
         return g, hid
 
-    def initialize_state(self, y: torch.Tensor) -> List[torch.Tensor]:
+    def initialize_state(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Initialize the state of the RNN layers, with same dtype and device as input `y`.
 
@@ -206,7 +218,7 @@ class TransducerPredictor(BaseModule):
         """
         batch = y.size(0)
         if self.random_state_sampling and self.training:
-            state = [
+            state = (
                 torch.randn(
                     self.num_layers,
                     batch,
@@ -221,10 +233,10 @@ class TransducerPredictor(BaseModule):
                     dtype=y.dtype,
                     device=y.device,
                 ),
-            ]
+            )
 
         else:
-            state = [
+            state = (
                 torch.zeros(
                     self.num_layers,
                     batch,
@@ -239,5 +251,5 @@ class TransducerPredictor(BaseModule):
                     dtype=y.dtype,
                     device=y.device,
                 ),
-            ]
+            )
         return state

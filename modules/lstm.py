@@ -112,7 +112,7 @@ class LSTMDropout(torch.nn.Module):
         Returns:
             A `torch.nn.LSTM`.
         """
-        super(LSTMDropout, self).__init__()
+        super().__init__()
 
         self.lstm = torch.nn.LSTM(
             input_size=input_size,
@@ -150,11 +150,11 @@ class LSTMDropout(torch.nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        h: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        h: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         x, h = self.lstm(x, h)
 
-        if self.dropout:
+        if self.dropout is not None:
             x = self.dropout(x)
 
         return x, h
@@ -209,7 +209,7 @@ class StackedLSTM(torch.nn.Module):
         first_layer_args: List,
         other_layer_args: List,
     ):
-        super(StackedLSTM, self).__init__()
+        super().__init__()
         self.layers: torch.nn.ModuleList = init_stacked_lstm(
             num_layers, layer, first_layer_args, other_layer_args
         )
@@ -254,7 +254,7 @@ class StackedLSTM(torch.nn.Module):
 
 class LSTMLayer(torch.nn.Module):
     def __init__(self, cell, *cell_args):
-        super(LSTMLayer, self).__init__()
+        super().__init__()
         self.cell = cell(*cell_args)
 
     def forward(
@@ -313,8 +313,8 @@ class LayerNormLSTMCell(torch.nn.Module):
         return hy, (hy, cy)
 
 
-def label_collate(labels, device=None):
-    """Collates the label inputs for the rnn-t prediction network.
+def label_collate(labels):
+    """Collates the label inputs for the transducer prediction network.
     If `labels` is already in torch.Tensor form this is a no-op.
 
     Args:
@@ -326,16 +326,17 @@ def label_collate(labels, device=None):
     """
 
     if isinstance(labels, torch.Tensor):
-        return labels.type(torch.int64)
+        return labels.to(dtype=torch.int64)
     if not isinstance(labels, (list, tuple)):
         raise ValueError(f"`labels` should be a list or tensor not {type(labels)}")
 
     batch_size = len(labels)
-    max_len = max(len(label) for label in labels)
+    all_lens = [len(label) for label in labels]
+    max_len = max(all_lens)
 
     cat_labels = np.full((batch_size, max_len), fill_value=0.0, dtype=np.int32)
     for e, l in enumerate(labels):
         cat_labels[e, : len(l)] = l
-    labels = torch.tensor(cat_labels, dtype=torch.int64, device=device)
+    labels = torch.tensor(cat_labels, dtype=torch.int64)
 
     return labels
