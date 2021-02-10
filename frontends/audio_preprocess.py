@@ -36,11 +36,10 @@ class STFT(nn.Module):
         super().__init__()
         self.filter_length = filter_length
         self.hop_length = hop_length
-        self.win_length = win_length if win_length else filter_length
         self.window = window
         self.forward_transform = None
         self.pad_amount = int(self.filter_length / 2)
-        scale = self.filter_length / self.hop_length
+        win_length = win_length if win_length else filter_length
         fourier_basis = np.fft.fft(np.eye(self.filter_length))
 
         cutoff = int((self.filter_length / 2 + 1))
@@ -48,22 +47,17 @@ class STFT(nn.Module):
             [np.real(fourier_basis[:cutoff, :]), np.imag(fourier_basis[:cutoff, :])]
         )
         forward_basis = torch.FloatTensor(fourier_basis[:, None, :])
-        inverse_basis = torch.FloatTensor(
-            np.linalg.pinv(scale * fourier_basis).T[:, None, :]
-        )
 
-        assert filter_length >= self.win_length
+        assert filter_length >= win_length
         # get window and zero center pad it to filter_length
-        fft_window = get_window(window, self.win_length, fftbins=True)
+        fft_window = get_window(window, win_length, fftbins=True)
         fft_window = pad_center(fft_window, filter_length)
         fft_window = torch.from_numpy(fft_window).float()
 
         # window the bases
         forward_basis *= fft_window
-        inverse_basis *= fft_window
 
         self.register_buffer("forward_basis", forward_basis.float())
-        self.register_buffer("inverse_basis", inverse_basis.float())
 
     def forward(self, input_data):
         """Take input data (audio) to STFT domain.

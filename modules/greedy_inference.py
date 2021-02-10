@@ -130,6 +130,7 @@ class GreedyInference(nn.Module):
                 inseq, logitlen, device=inseq.device
             )
 
+            # Note: following code will not work for TorchScript
             hypotheses_list = [
                 torch.tensor(sent, dtype=torch.long) for sent in hypotheses
             ]
@@ -217,6 +218,7 @@ class GreedyInference(nn.Module):
                 # This is accumulating blanks over all time steps T and all target
                 # steps min(max_symbols, U)
                 k_is_blank = (k == self._blank_index).to(blank_mask.device)
+                # bitwise_or is not supported in ONNX
                 blank_mask.bitwise_or_(k_is_blank)
 
                 # If all samples predict / have predicted prior blanks, exit loop early
@@ -227,8 +229,8 @@ class GreedyInference(nn.Module):
                     # Collect batch indices where blanks occurred now/past
                     blank_indices = torch.empty(0).to(dtype=torch.long)
                     if hidden is not None:
-                        # as_tuple=False does not work for torchscript
-                        blank_indices = (blank_mask == 1).nonzero()
+                        # Note: as_tuple=False does not work for torchscript
+                        blank_indices = (blank_mask == 1).nonzero(as_tuple=False)
 
                     # Recover prior state for all samples which predicted blank now/past
                     if hidden is not None:
@@ -259,13 +261,3 @@ class GreedyInference(nn.Module):
                     symbols_added += 1
 
         return label, hidden
-
-
-@torch.jit.script
-def is_all_one(tensor: torch.Tensor):
-    return torch.tensor(tensor.all() * 1)
-
-
-@torch.jit.script
-def is_zero(tensor: torch.Tensor, idx: int):
-    return torch.tensor(tensor[idx] == 0)

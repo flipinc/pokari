@@ -16,6 +16,11 @@ RUN git clone --depth 1 --branch release/0.6 https://github.com/pytorch/audio.gi
     BUILD_SOX=1 python setup.py install && \
     cd .. && rm -r audio
 
+# if youre going to export onnx, which is highly unstable right now,
+# uncomment and run following command to install latest pytorch nightly build
+# RUN pip uninstall torchvision torchaudio torch torchtext
+# RUN pip install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cu110/torch_nightly.html
+
 # build RNN-T loss
 WORKDIR /workspace/deps/rnnt
 RUN COMMIT_SHA=f546575109111c455354861a0567c8aa794208a2 && \
