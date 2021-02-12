@@ -335,8 +335,8 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
 
         # disable autocast to get full range of stft values
         # when compiling to torchscript, comment the following line
-        # with torch.cuda.amp.autocast(enabled=False):
-        x = self.stft(x)
+        with torch.cuda.amp.autocast(enabled=False):
+            x = self.stft(x)
 
         # torch returns real, imag; so convert to magnitude
         if not self.stft_conv:
@@ -345,6 +345,8 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         # get power spectrum
         if self.mag_power != 1.0:
             x = x.pow(self.mag_power)
+
+        print(self.fb.size(), x.size())
 
         # dot with filterbank energies
         x = torch.matmul(self.fb.to(x.dtype), x)
