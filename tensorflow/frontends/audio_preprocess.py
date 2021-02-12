@@ -1,6 +1,7 @@
 import math
 
 import librosa
+import numpy as np
 import tensorflow as tf
 
 
@@ -70,7 +71,7 @@ class AudioToMelSpectrogramPreprocessor:
         x = audio_signals
         del audio_signals
 
-        audio_lens = tf.math.ceil(audio_lens / self.hop_length)
+        audio_lens = np.ceil(audio_lens / self.hop_length)
 
         # dither
         if self.dither > 0:
@@ -116,7 +117,7 @@ class AudioToMelSpectrogramPreprocessor:
 
         # normalize if required
         if self.normalize_type is not None:
-            x = self.normalize_batch(x, tf.cast(audio_lens, tf.int32))
+            x = self.normalize_batch(x, audio_lens.astype("int32"))
 
         # TODO: pad to multiple of 8 for efficient tensor core use
 

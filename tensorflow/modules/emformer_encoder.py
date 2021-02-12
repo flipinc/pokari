@@ -62,7 +62,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
     def create_stream_mask(
         self,
-        audio_lens: tf.Tensor,
+        audio_lens: np.array,
         segment_length: int,
     ):
         bs = audio_lens.shape[0]
@@ -82,7 +82,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         return mask
 
-    def create_mask(self, audio_lens: tf.Tensor, t_max: int):
+    def create_mask(self, audio_lens: np.array, t_max: int):
         """Emformer attention mask
 
         There are four types of masks.
@@ -159,6 +159,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
         for i in range(bs):
+            print(audio_lens)
             max_len = audio_lens[i]
 
             # 4.1 pad mask_body
@@ -190,15 +191,15 @@ class EmformerEncoder(tf.keras.layers.Layer):
     def stream(
         self,
         audio_signals: tf.Tensor,
-        audio_lens: tf.Tensor,
+        audio_lens: np.array,
         cache_k: Optional[tf.Tensor] = None,
         cache_v: Optional[tf.Tensor] = None,
     ):
         bs = audio_signals.shape[0]
 
         if bs > 1:
-            max_len = tf.math.reduce_max(audio_lens)
-            min_len = tf.math.reduce_min(audio_lens)
+            max_len = np.amax(audio_lens)
+            min_len = np.amin(audio_lens)
             if max_len != min_len:
                 raise ValueError(
                     "In streaming mode, all audio lens must be equal if batch size > 1"
@@ -256,7 +257,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         return x, new_audio_lens, new_cache_k, new_cache_v
 
-    def full_context(self, audio_signals: tf.Tensor, audio_lens: tf.Tensor):
+    def full_context(self, audio_signals: tf.Tensor, audio_lens: np.array):
         # 1. projection
         x = tf.transpose(audio_signals, [0, 2, 1])
         x = self.linear(x)
@@ -289,7 +290,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
     def call(
         self,
         audio_signals: tf.Tensor,
-        audio_lens: tf.Tensor,
+        audio_lens: np.array,
         cache_k: Optional[tf.Tensor] = None,
         cache_v: Optional[tf.Tensor] = None,
         mode: str = "full_context",
@@ -301,7 +302,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         Args:
             audio_signals (tf.Tensor): [B, D_1, Tmax]
-            audio_lens (tf.Tensor): [B]
+            audio_lens (np.array): [B]
 
         Returns:
             tf.Tensor: [B, D_2, Tmax]

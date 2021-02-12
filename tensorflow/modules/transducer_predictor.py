@@ -73,7 +73,6 @@ class TransducerPredictor(tf.keras.layers.Layer):
     def call(
         self,
         targets,
-        target_lens,
         states: Optional[Tuple[tf.Tensor, tf.Tensor]] = None,
         training=True,
     ):
@@ -87,7 +86,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         )  # (B, U, D)
         g = tf.transpose(g, (0, 2, 1))  # (B, D, U)
 
-        return g, target_lens
+        return g
 
     def predict(
         self,

@@ -8,6 +8,7 @@ import tensorflow as tf
 from datasets.audio_to_text import DatasetCreator
 from frontends.audio_preprocess import AudioToMelSpectrogramPreprocessor
 from frontends.spec_augment import SpectrogramAugmentation
+from losses.transducer import TransducerLoss
 from modules.emformer_encoder import EmformerEncoder
 from modules.transducer_joint import TrasducerJoint
 from modules.transducer_predictor import TransducerPredictor
@@ -127,8 +128,11 @@ if __name__ == "__main__":
     # joint(dummy_encoder, dummy_predictor)
 
     ################
-    # all
+    # loss
     ################
+
+    loss = TransducerLoss(vocab_size=29)
+
     @tf.function
     def run():
         audio_signals = tf.random.normal([4, 10000])
@@ -136,7 +140,7 @@ if __name__ == "__main__":
 
         transcripts = tf.expand_dims(tf.range(1, 16), axis=0)
         transcripts = tf.tile(transcripts, [4, 1])
-        transcript_lens = tf.constant([15, 15, 15, 15])
+        transcript_lens = np.array([15, 15, 15, 15])
 
         audio_signals, audio_lens = preprocessor(
             audio_signals=audio_signals,
@@ -150,19 +154,21 @@ if __name__ == "__main__":
         )
         del audio_signals, audio_lens
 
-        decoded_targets, decoded_lens = predictor(
-            targets=transcripts, target_lens=transcript_lens
-        )
-        del transcripts, transcript_lens
+        decoded_targets = predictor(targets=transcripts, target_lens=transcript_lens)
+        del transcripts
 
         joint_outputs = joint(
             encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
         )
+        del encoded_signals, decoded_targets
 
-        print("encoded_signals: ", encoded_signals.shape)
-        print("encoded_lens: ", encoded_lens.shape)
-        print("decoded_targets: ", decoded_targets.shape)
-        print("decoded_lens: ", decoded_lens.shape)
-        print("joint_outputs: ", joint_outputs.shape)
+        loss_value = loss(
+            log_probs=joint_outputs,
+            targets=transcripts,
+            encoded_lens=encoded_lens,
+            decoded_lens=transcript_lens,
+        )
+
+        print("loss_value: ", loss_value)
 
     run()

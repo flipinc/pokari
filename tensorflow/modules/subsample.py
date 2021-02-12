@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import tensorflow as tf
 
 
@@ -77,50 +78,50 @@ class VggSubsample(tf.keras.layers.Layer):
             + 1
         )
 
-    def calc_tensor_length(self, in_length: tf.Tensor):
-        return tf.math.ceil(
-            (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
-            / float(self.pool_stride)
-            + 1
-        )
+    # def calc_tensor_length(self, in_length: tf.Tensor):
+    #     return tf.math.ceil(
+    #         (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
+    #         / float(self.pool_stride)
+    #         + 1
+    #     )
 
-    def call(self, x, lengths):
+    def call(self, audio_signals: tf.Tensor, audio_lens: np.array):
         """
         Args:
-            x (torch.Tensor): [B, Tmax, D]
+            audio_signals (torch.Tensor): [B, Tmax, D]
 
         Returns:
             [B, Tmax, D]
         """
         # 1. add padding to make this causal convolution
         padding = tf.constant([[0, 0], [1, 1], [self.left_padding, 0]])
-        x = tf.pad(x, padding)
+        audio_signals = tf.pad(audio_signals, padding)
 
         # 2. forward
-        x = tf.expand_dims(x, axis=-1)
-        x = self.conv(x)
-        b, t, f, c = x.shape
-        x = tf.reshape(x, [b, t, c * f])
-        x = self.out(x)
+        audio_signals = tf.expand_dims(audio_signals, axis=-1)
+        audio_signals = self.conv(audio_signals)
+        b, t, f, c = audio_signals.shape
+        audio_signals = tf.reshape(audio_signals, [b, t, c * f])
+        audio_signals = self.out(audio_signals)
 
         # 3. calculate new length
         # TODO: improve the performance of length calculation
         new_lengths = [None] * b
         for i in range(self.sampling_num):
             for idx in range(b):
-                new_length = new_lengths[idx] if i > 0 else lengths[idx]
-                new_lengths[idx] = self.calc_tensor_length(new_length)
+                new_length = new_lengths[idx] if i > 0 else audio_lens[idx]
+                new_lengths[idx] = self.calc_length(new_length)
 
-        lengths = tf.stack(new_lengths)
+        audio_lens = np.stack(new_lengths)
 
-        return x, lengths
+        return audio_signals, audio_lens
 
 
 def stack_subsample(
-    audio_signals: tf.Tensor, audio_lens: tf.Tensor, subsampling_factor: int
+    audio_signals: tf.Tensor, audio_lens: np.array, subsampling_factor: int
 ):
     bs, t_max, idim = audio_signals.shape
     t_new = math.ceil(t_max / subsampling_factor)
     audio_signals = tf.reshape(audio_signals, [bs, t_new, idim * subsampling_factor])
-    audio_lens = tf.cast(tf.math.ceil(audio_lens / subsampling_factor), tf.int32)
+    audio_lens = np.ceil(audio_lens / subsampling_factor)
     return audio_signals, audio_lens
