@@ -5,10 +5,9 @@
 
 ### Start with Docker
 ```shell
-docker build -t ekaki/pokari .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g ekaki/pokari
+docker build -t pokari/tensorflow -f docker/Dockerfile.tensorflow .
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g pokari/tensorflow
 ```
 
 ### Design
-- Since this repository is made for **production** use, every torch module should be scriptable meaning, wrapping by `torch.jit.script` should return `ScriptModule` without any error.
-- Every `ScriptModule` should be instantiated at the root module (in most cases this is `LightningModule`), so that the converting the whole model to TorchScript is done by setting `return_torchscript` to `True`.
+- Pytorch is very easy to quickly develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Once Pytorch's support for ScriptModule -> onnx conversion is decent enough, I am going to think this over again. 

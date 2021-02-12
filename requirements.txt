@@ -3,18 +3,23 @@ catalyst-sphinx-theme
 pre-commit
 black
 mlflow
-mypy
 omegaconf
 hydra-core
-pytorch-lightning
 librosa
 soundfile
 flake8
 unidecode
 frozendict
-torch-stft
 pytest
 inflect
 onnxruntime
 numpy
 editdistance
+tqdm
+
+# for tensorflow
+tensorflow-io
+
+# for pytorch
+torch-stft
+pytorch-lightning

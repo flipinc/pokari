@@ -31,32 +31,6 @@ class AudioSegment(object):
 
         self._orig_sr = orig_sr if orig_sr is not None else sample_rate
 
-    def __eq__(self, other):
-        """Return whether two objects are equal."""
-        if type(other) is not type(self):
-            return False
-        if self._sample_rate != other._sample_rate:
-            return False
-        if self._samples.shape != other._samples.shape:
-            return False
-        if np.any(self.samples != other._samples):
-            return False
-        return True
-
-    def __ne__(self, other):
-        """Return whether two objects are unequal."""
-        return not self.__eq__(other)
-
-    def __str__(self):
-        """Return human-readable representation of segment."""
-        return "%s: num_samples=%d, sample_rate=%d, duration=%.2fsec, rms=%.2fdB" % (
-            type(self),
-            self.num_samples,
-            self.sample_rate,
-            self.duration,
-            self.rms_db,
-        )
-
     @staticmethod
     def _convert_samples_to_float32(samples):
         """Convert sample type to float32.
@@ -111,40 +85,3 @@ class AudioSegment(object):
     @property
     def samples(self):
         return self._samples.copy()
-
-    @property
-    def sample_rate(self):
-        return self._sample_rate
-
-    @property
-    def num_samples(self):
-        return self._samples.shape[0]
-
-    @property
-    def duration(self):
-        return self._samples.shape[0] / float(self._sample_rate)
-
-    @property
-    def rms_db(self):
-        mean_square = np.mean(self._samples ** 2)
-        return 10 * np.log10(mean_square)
-
-    @property
-    def orig_sr(self):
-        return self._orig_sr
-
-    def gain_db(self, gain):
-        self._samples *= 10.0 ** (gain / 20.0)
-
-    def pad(self, pad_size, symmetric=False):
-        """Add zero padding to the sample. The pad size is given in number
-        of samples.
-        If symmetric=True, `pad_size` will be added to both sides. If false,
-        `pad_size`
-        zeros will be added only to the end.
-        """
-        self._samples = np.pad(
-            self._samples,
-            (pad_size if symmetric else 0, pad_size),
-            mode="constant",
-        )

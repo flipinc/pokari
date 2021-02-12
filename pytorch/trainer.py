@@ -3,8 +3,8 @@ from hydra.experimental import compose, initialize
 
 from models.transducer import Transducer
 
-initialize(config_path="configs/emformer", job_name="emformer")
-cfg = compose(config_name="emformer_librispeech_char.yaml")
+initialize(config_path="../configs/emformer", job_name="emformer")
+cfg = compose(config_name="emformer_librispeech_char_pytorch.yml")
 
 
 def main():
