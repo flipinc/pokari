@@ -159,7 +159,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
         for i in range(bs):
-            max_len = int(audio_lens[i])
+            max_len = audio_lens[i]
 
             # 4.1 pad mask_body
             mask_body[i, :, max_len:] = 0
@@ -234,10 +234,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
             )
 
         new_cache_k = tf.TensorArray(
-            tf.float32, size=len(self.layers), clear_after_read=True
+            self.dtype, size=len(self.layers), clear_after_read=True
         )
         new_cache_v = tf.TensorArray(
-            tf.float32, size=len(self.layers), clear_after_read=True
+            self.dtype, size=len(self.layers), clear_after_read=True
         )
         for i, layer in enumerate(self.layers):
             x, (temp_cache_k, temp_cache_v) = layer(

@@ -77,6 +77,13 @@ class VggSubsample(tf.keras.layers.Layer):
             + 1
         )
 
+    def calc_tensor_length(self, in_length: tf.Tensor):
+        return tf.math.ceil(
+            (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
+            / float(self.pool_stride)
+            + 1
+        )
+
     def call(self, x, lengths):
         """
         Args:
@@ -100,11 +107,11 @@ class VggSubsample(tf.keras.layers.Layer):
         # TODO: improve the performance of length calculation
         new_lengths = [None] * b
         for i in range(self.sampling_num):
-            for idx, length in enumerate(lengths):
-                new_length = new_lengths[idx] if i > 0 else length
-                new_lengths[idx] = self.calc_length(int(new_length))
+            for idx in range(b):
+                new_length = new_lengths[idx] if i > 0 else lengths[idx]
+                new_lengths[idx] = self.calc_tensor_length(new_length)
 
-        lengths = tf.concat(new_lengths, axis=0)
+        lengths = tf.stack(new_lengths)
 
         return x, lengths
 
