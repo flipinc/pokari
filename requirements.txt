@@ -19,6 +19,7 @@ tqdm
 
 # for tensorflow
 tensorflow-io
+tensorflow-addons
 
 # for pytorch
 torch-stft

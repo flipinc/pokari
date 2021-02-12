@@ -66,20 +66,22 @@ class AudioToMelSpectrogramPreprocessor:
             axis=0,
         )
 
-    @tf.function
-    def __call__(self, xs, x_lens):
-        x_lens = tf.math.ceil(x_lens / self.hop_length)
+    def __call__(self, audio_signals, audio_lens):
+        x = audio_signals
+        del audio_signals
+
+        audio_lens = tf.math.ceil(audio_lens / self.hop_length)
 
         # dither
         if self.dither > 0:
-            xs += self.dither * tf.random.normal(tf.shape(xs))
+            x += self.dither * tf.random.normal(tf.shape(x))
 
         # preemphasis
         if self.preemph is not None:
-            xs = tf.concat(
+            x = tf.concat(
                 (
-                    tf.expand_dims(xs[:, 0], axis=1),
-                    xs[:, 1:] - self.preemph * xs[:, :-1],
+                    tf.expand_dims(x[:, 0], axis=1),
+                    x[:, 1:] - self.preemph * x[:, :-1],
                 ),
                 axis=1,
             )
@@ -88,7 +90,7 @@ class AudioToMelSpectrogramPreprocessor:
         spectrograms = tf.square(
             tf.abs(
                 tf.signal.stft(
-                    xs,
+                    x,
                     frame_length=self.win_length,
                     frame_step=self.hop_length,
                     fft_length=self.n_fft,
@@ -98,54 +100,52 @@ class AudioToMelSpectrogramPreprocessor:
         )
 
         # mel spectrogram
-        xs = tf.matmul(self.filterbanks, tf.transpose(spectrograms, [0, 2, 1]))
+        x = tf.matmul(self.filterbanks, tf.transpose(spectrograms, [0, 2, 1]))
         del spectrograms
 
         # log features if required
         if self.log:
             if self.log_zero_guard_type == "add":
-                xs = tf.math.log(xs + self.log_zero_guard_value)
+                x = tf.math.log(x + self.log_zero_guard_value)
             elif self.log_zero_guard_type == "clamp":
-                xs = tf.math.log(
-                    tf.clip_by_value(xs, clip_value_min=self.log_zero_guard_value)
+                x = tf.math.log(
+                    tf.clip_by_value(x, clip_value_min=self.log_zero_guard_value)
                 )
             else:
                 raise ValueError("log_zero_guard_type was not understood")
 
         # normalize if required
         if self.normalize_type is not None:
-            xs = self.normalize_batch(xs, tf.cast(x_lens, tf.int32))
+            x = self.normalize_batch(x, tf.cast(audio_lens, tf.int32))
 
         # TODO: pad to multiple of 8 for efficient tensor core use
 
-        return xs, x_lens
+        return x, audio_lens
 
-    def normalize_batch(self, xs, x_lens):
+    def normalize_batch(self, x, audio_lens):
         """Normalize audio signal"""
 
         CONSTANT = 1e-6
 
         if self.normalize_type == "per_feature":
             mean_list = tf.TensorArray(
-                tf.float32, size=xs.shape[0], clear_after_read=True
+                tf.float32, size=x.shape[0], clear_after_read=True
             )
             std_list = tf.TensorArray(
-                tf.float32, size=xs.shape[0], clear_after_read=True
+                tf.float32, size=x.shape[0], clear_after_read=True
             )
-            for i in range(xs.shape[0]):
+            for i in range(x.shape[0]):
                 mean_list = mean_list.write(
-                    i, tf.math.reduce_mean(xs[i, :, : x_lens[i]], axis=1)
+                    i, tf.math.reduce_mean(x[i, :, : audio_lens[i]], axis=1)
                 )
                 std_list = std_list.write(
-                    i, tf.math.reduce_std(xs[i, :, : x_lens[i]], axis=1)
+                    i, tf.math.reduce_std(x[i, :, : audio_lens[i]], axis=1)
                 )
-            xs_mean = mean_list.stack()
-            xs_std = std_list.stack()
-            # make sure xs_std is not zero
-            xs_std += CONSTANT
-            return (xs - tf.expand_dims(xs_mean, axis=2)) / tf.expand_dims(
-                xs_std, axis=2
-            )
+            x_mean = mean_list.stack()
+            x_std = std_list.stack()
+            # make sure x_std is not zero
+            x_std += CONSTANT
+            return (x - tf.expand_dims(x_mean, axis=2)) / tf.expand_dims(x_std, axis=2)
         else:
             raise NotImplementedError(
                 f"{self.normalize_type} is not currently supported."

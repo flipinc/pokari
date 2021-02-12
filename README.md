@@ -6,7 +6,7 @@
 ### Start with Docker
 ```shell
 docker build -t pokari/tensorflow -f docker/Dockerfile.tensorflow .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g pokari/tensorflow
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g ekaki/pokari
 ```
 
 ### Design
