@@ -1,4 +1,3 @@
-import multiprocessing
 import os
 from typing import Callable, List, Optional, Union
 
@@ -86,7 +85,7 @@ class DatasetCreator:
         )
 
     def create(self):
-        self.create_tfrecords()
+        num_samples = self.create_tfrecords()
 
         pattern = os.path.join(self.tfrecords_dir, f"{self.stage}*.tfrecord")
         files = tf.data.Dataset.list_files(pattern)
@@ -131,7 +130,7 @@ class DatasetCreator:
 
         dataset = dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
-        return dataset
+        return dataset, num_samples
 
     def collate_fn(self, tf_record: tf.Tensor):
         result = tf.io.parse_single_example(
@@ -157,7 +156,7 @@ class DatasetCreator:
         transcript = tf.strings.to_number(
             tf.strings.split(transcript), out_type=tf.int32
         )
-        transcript_len = tf.cast(len(transcript), tf.int32)
+        transcript_len = tf.cast(tf.shape(transcript)[0], tf.int32)
 
         with tf.device("/CPU:0"):
             audio = self.augmentor.perturb(audio)
@@ -179,7 +178,7 @@ class DatasetCreator:
         if tf.io.gfile.glob(
             os.path.join(self.tfrecords_dir, f"{self.stage}*.tfrecord")
         ):
-            return
+            return None
 
         shard_paths = [
             os.path.join(self.tfrecords_dir, f"{self.stage}_{idx}.tfrecord")
@@ -189,11 +188,19 @@ class DatasetCreator:
         splitted_collections = np.array_split(
             np.array(self.collections), self.tfrecords_shards
         )
-        with multiprocessing.Pool(self.tfrecords_shards) as pool:
-            pool.map(self.create_one_tfrecord, zip(shard_paths, splitted_collections))
 
-    def create_one_tfrecord(self, inputs):
-        shard_path, splitted_collection = inputs
+        # TODO: find a way to make this parallel
+        num_samples = 0
+        for idx, shard_path in enumerate(shard_paths):
+            num_samples += self.create_one_tfrecord(
+                shard_path, splitted_collections[idx]
+            )
+
+        return num_samples
+
+    def create_one_tfrecord(self, shard_path, splitted_collection):
+        num_samples = 0
+
         with tf.io.TFRecordWriter(shard_path, options="ZLIB") as out:
             for (
                 id,
@@ -229,4 +236,8 @@ class DatasetCreator:
 
                 out.write(example.SerializeToString())
 
+                num_samples += 1
+
             out.close()
+
+        return num_samples

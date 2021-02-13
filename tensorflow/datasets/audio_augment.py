@@ -1,7 +1,7 @@
 import random
 
-import librosa
 import numpy as np
+import tensorflow_io as tfio
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -9,7 +9,6 @@ class SpeedPerturbation(object):
     def __init__(
         self,
         sr,
-        resample_type,
         min_speed_rate=0.9,
         max_speed_rate=1.1,
         num_rates=5,
@@ -52,12 +51,6 @@ class SpeedPerturbation(object):
         if min_rate < 0.0:
             raise ValueError("Minimum sampling rate modifier must be > 0.")
 
-        if resample_type not in ("kaiser_best", "kaiser_fast", "fft", "scipy"):
-            raise ValueError(
-                "Supported `resample_type` values are"
-                "('kaiser_best','kaiser_fast', 'fft', 'scipy')"
-            )
-
         self._sr = sr
         self._min_rate = min_speed_rate
         self._max_rate = max_speed_rate
@@ -66,7 +59,6 @@ class SpeedPerturbation(object):
             self._rates = np.linspace(
                 self._min_rate, self._max_rate, self._num_rates, endpoint=True
             )
-        self._res_type = resample_type
         self._rng = random.Random() if rng is None else rng
 
     def max_augmentation_length(self, length):
@@ -84,7 +76,7 @@ class SpeedPerturbation(object):
             return
 
         new_sr = int(self._sr * speed_rate)
-        audio = librosa.core.resample(audio, self._sr, new_sr, res_type=self._res_type)
+        audio = tfio.audio.resample(audio, self._sr, new_sr)
 
         return audio
 

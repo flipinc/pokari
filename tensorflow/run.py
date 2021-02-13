@@ -131,44 +131,41 @@ if __name__ == "__main__":
     # loss
     ################
 
-    loss = TransducerLoss(vocab_size=29)
+    # loss = TransducerLoss(vocab_size=29)
 
-    @tf.function
-    def run():
-        audio_signals = tf.random.normal([4, 10000])
-        audio_lens = np.array([10000, 10000, 10000, 10000])
+    # @tf.function
+    # def run():
+    #     audio_signals = tf.random.normal([4, 12000])
+    #     audio_lens = np.array([12000, 12000, 12000, 12000])
 
-        transcripts = tf.expand_dims(tf.range(1, 16), axis=0)
-        transcripts = tf.tile(transcripts, [4, 1])
-        transcript_lens = np.array([15, 15, 15, 15])
+    #     transcripts = tf.expand_dims(tf.range(1, 16), axis=0)
+    #     transcripts = tf.tile(transcripts, [4, 1])
+    #     transcript_lens = np.array([15, 15, 15, 15])
 
-        audio_signals, audio_lens = preprocessor(
-            audio_signals=audio_signals,
-            audio_lens=audio_lens,
-        )
+    #     audio_signals, audio_lens = preprocessor(
+    #         audio_signals=audio_signals,
+    #         audio_lens=audio_lens,
+    #     )
 
-        audio_signals = spec_augment(audio_signals=audio_signals)
+    #     audio_signals = spec_augment(audio_signals=audio_signals)
 
-        encoded_signals, encoded_lens, _, _ = encoder(
-            audio_signals=audio_signals, audio_lens=audio_lens
-        )
-        del audio_signals, audio_lens
+    #     encoded_signals, encoded_lens, _, _ = encoder(
+    #         audio_signals=audio_signals, audio_lens=audio_lens
+    #     )
+    #     del audio_signals, audio_lens
 
-        decoded_targets = predictor(targets=transcripts, target_lens=transcript_lens)
-        del transcripts
+    #     decoded_targets = predictor(targets=transcripts)
 
-        joint_outputs = joint(
-            encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
-        )
-        del encoded_signals, decoded_targets
+    #     joint_outputs = joint(
+    #         encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
+    #     )
+    #     del encoded_signals, decoded_targets
 
-        loss_value = loss(
-            log_probs=joint_outputs,
-            targets=transcripts,
-            encoded_lens=encoded_lens,
-            decoded_lens=transcript_lens,
-        )
+    #     loss_value = loss(
+    #         log_probs=joint_outputs,
+    #         targets=transcripts,
+    #         encoded_lens=encoded_lens,
+    #         decoded_lens=transcript_lens,
+    #     )
 
-        print("loss_value: ", loss_value)
-
-    run()
+    # run()

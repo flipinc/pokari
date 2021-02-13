@@ -55,9 +55,8 @@ RUN pip install -r requirements.txt
 WORKDIR /workspace/pokari
 COPY . .
 
-# Note: After docker built, you must cd into the following directory 
-# /usr/local/lib/python3.6/dist-packages/warprnnt_tensorflow-0.1-py3.6-linux-x86_64.egg/warprnnt_tensorflow
-# and edit `__init__.py` by commenting out everything after RegisterShape
+# Note: After docker built, you must cd into the following directory and edit `__init__.py` by commenting out everything after RegisterShape
+# nano /usr/local/lib/python3.6/dist-packages/warprnnt_tensorflow-0.1-py3.6-linux-x86_64.egg/warprnnt_tensorflow/__init__.py
 # ref: https://github.com/TensorSpeech/TensorFlowASR/issues/88
 # ref: https://github.com/HawkAaron/warp-transducer/issues/59
 # ref: https://stackoverflow.com/questions/59043649/attributeerror-module-tensorflow-python-framework-ops-has-no-attribute-regis
