@@ -120,7 +120,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         # Prepend blank "start of sequence" symbol (zero tensor)
         if add_sos:
-            B, U, H = y.shape
+            B = tf.shape(y)[0]
+            H = tf.shape(y)[2]
             start = tf.zeros((B, 1, H), dtype=y.dtype)
             y = tf.concat([start, y], axis=1)  # (B, U + 1, H)
 
@@ -136,18 +137,18 @@ class TransducerPredictor(tf.keras.layers.Layer):
         return g, hid
 
     def initialize_state(self, y, training: bool = True):
-        batch = y.shape[0]
+        b = tf.shape(y)[0]
         states = []
 
         if self.random_state_sampling and training:
             for _ in range(self.num_layers):
                 state = (
                     tf.random.normal(
-                        (batch, self.dim_model),
+                        (b, self.dim_model),
                         dtype=y.dtype,
                     ),
                     tf.random.normal(
-                        (batch, self.dim_model),
+                        (b, self.dim_model),
                         dtype=y.dtype,
                     ),
                 )
@@ -157,11 +158,11 @@ class TransducerPredictor(tf.keras.layers.Layer):
             for _ in range(self.num_layers):
                 state = (
                     tf.zeros(
-                        (batch, self.dim_model),
+                        (b, self.dim_model),
                         dtype=y.dtype,
                     ),
                     tf.zeros(
-                        (batch, self.dim_model),
+                        (b, self.dim_model),
                         dtype=y.dtype,
                     ),
                 )

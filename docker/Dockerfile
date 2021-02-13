@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:latest-gpu
+FROM tensorflow/tensorflow:nightly-gpu
 
 # install sndfile library
 RUN apt-get update && \

@@ -10,7 +10,7 @@ from frontends.audio_preprocess import AudioToMelSpectrogramPreprocessor
 from frontends.spec_augment import SpectrogramAugmentation
 from losses.transducer import TransducerLoss
 from modules.emformer_encoder import EmformerEncoder
-from modules.transducer_joint import TrasducerJoint
+from modules.transducer_joint import TransducerJoint
 from modules.transducer_predictor import TransducerPredictor
 
 initialize(config_path="../configs/emformer", job_name="emformer")
@@ -21,51 +21,53 @@ if __name__ == "__main__":
     # dataset
     ################
 
-    # creator = DatasetCreator(
-    #     batch_size=4,
-    #     stage="val",
-    #     tfrecords_dir="../datasets",
-    #     manifest_filepath="../datasets/manifest_val.json",
-    #     labels=[
-    #         " ",
-    #         "a",
-    #         "b",
-    #         "c",
-    #         "d",
-    #         "e",
-    #         "f",
-    #         "g",
-    #         "h",
-    #         "i",
-    #         "j",
-    #         "k",
-    #         "l",
-    #         "m",
-    #         "n",
-    #         "o",
-    #         "p",
-    #         "q",
-    #         "r",
-    #         "s",
-    #         "t",
-    #         "u",
-    #         "v",
-    #         "w",
-    #         "x",
-    #         "y",
-    #         "z",
-    #         "'",
-    #     ],
-    #     sample_rate=16000,
-    # )
+    creator = DatasetCreator(
+        batch_size=4,
+        stage="val",
+        tfrecords_dir="../datasets",
+        manifest_filepath="../datasets/manifest_val.json",
+        labels=[
+            " ",
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f",
+            "g",
+            "h",
+            "i",
+            "j",
+            "k",
+            "l",
+            "m",
+            "n",
+            "o",
+            "p",
+            "q",
+            "r",
+            "s",
+            "t",
+            "u",
+            "v",
+            "w",
+            "x",
+            "y",
+            "z",
+            "'",
+        ],
+        sample_rate=16000,
+    )
 
-    # datasets = creator.create()
+    datasets = creator.create()
+
+    print(next(iter(datasets)))
 
     ################
     # preprocessor
     ################
 
-    preprocessor = AudioToMelSpectrogramPreprocessor()
+    # preprocessor = AudioToMelSpectrogramPreprocessor()
 
     # audio = tf.random.normal([4, 10000])
     # audio_lens = tf.constant([10000, 10000, 10000, 10000])
@@ -76,7 +78,7 @@ if __name__ == "__main__":
     # specaug
     ################
 
-    spec_augment = SpectrogramAugmentation()
+    # spec_augment = SpectrogramAugmentation()
 
     # audio = tf.random.normal([4, 80, 120])
     # spec_augment(audio)
@@ -84,15 +86,15 @@ if __name__ == "__main__":
     ################
     # emformer
     ################
-    cfg_encoder = OmegaConf.to_container(cfg.model.encoder)
-    cfg_encoder.pop("_target_")
+    # cfg_encoder = OmegaConf.to_container(cfg.model.encoder)
+    # cfg_encoder.pop("_target_")
 
     # stack mode
     # cfg.pop("subsampling")
     # emformer = EmformerEncoder(**cfg, subsampling="stack")
 
     # vgg mode
-    encoder = EmformerEncoder(**cfg_encoder)
+    # encoder = EmformerEncoder(**cfg_encoder)
 
     # audio_signals = tf.random.normal([4, 80, 360])
     # audio_lens = tf.constant([360, 360, 360, 360])
@@ -102,9 +104,9 @@ if __name__ == "__main__":
     ################
     # predictor
     ################
-    cfg_predictor = OmegaConf.to_container(cfg.model.predictor)
-    cfg_predictor.pop("_target_")
-    predictor = TransducerPredictor(**cfg_predictor, vocab_size=29)
+    # cfg_predictor = OmegaConf.to_container(cfg.model.predictor)
+    # cfg_predictor.pop("_target_")
+    # predictor = TransducerPredictor(**cfg_predictor, vocab_size=29)
 
     # dummy = tf.range(1, 30, 2)
     # dummy = tf.expand_dims(dummy, axis=0)
@@ -116,11 +118,11 @@ if __name__ == "__main__":
     ################
     # joint
     ################
-    cfg_joint = OmegaConf.to_container(cfg.model.joint)
-    cfg_joint.pop("_target_")
-    joint = TrasducerJoint(
-        **cfg_joint, vocab_size=29, encoder_hidden=512, predictor_hidden=320
-    )
+    # cfg_joint = OmegaConf.to_container(cfg.model.joint)
+    # cfg_joint.pop("_target_")
+    # joint = TrasducerJoint(
+    #     **cfg_joint, vocab_size=29, encoder_hidden=512, predictor_hidden=320
+    # )
 
     # dummy_encoder = tf.random.normal((4, 512, 240))
     # dummy_predictor = tf.random.normal((4, 320, 64))

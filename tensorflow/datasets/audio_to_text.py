@@ -101,6 +101,8 @@ class DatasetCreator:
             num_parallel_reads=tf.data.experimental.AUTOTUNE,
         )
 
+        # map method is always executed in graph mode
+        # ref: https://www.tensorflow.org/tutorials/load_data/tfrecord
         dataset = dataset.map(
             self.collate_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE
         )
@@ -150,24 +152,27 @@ class DatasetCreator:
             rate_in=tf.cast(sample_rate, dtype=tf.int64),
             rate_out=self.sample_rate,
         )
+        # remove dimension added by ByteList (not 100% sure) and channel dimension
+        audio = tf.squeeze(audio)
         audio_len = tf.cast(tf.shape(audio)[0], tf.int32)
 
         transcript = result["text_tokens"]
+        # remove dimension added by ByteList (not 100% sure)
+        transcript = tf.squeeze(transcript)
         transcript = tf.strings.to_number(
             tf.strings.split(transcript), out_type=tf.int32
         )
-        transcript_len = tf.cast(tf.shape(transcript)[0], tf.int32)
 
         with tf.device("/CPU:0"):
             audio = self.augmentor.perturb(audio)
 
-            token_length = len(transcript)
+            transcript_len = tf.cast(tf.shape(transcript)[0], tf.int32)
             if self.bos_id is not None:
                 transcript = [self.bos_id] + transcript
-                token_length += 1
+                transcript_len += 1
             if self.eos_id is not None:
                 transcript = transcript + [self.eos_id]
-                token_length += 1
+                transcript_len += 1
 
             return audio, audio_len, transcript, transcript_len
 
@@ -178,6 +183,7 @@ class DatasetCreator:
         if tf.io.gfile.glob(
             os.path.join(self.tfrecords_dir, f"{self.stage}*.tfrecord")
         ):
+            print("Reusing tfrecord from previous iteration...")
             return None
 
         shard_paths = [
@@ -212,10 +218,11 @@ class DatasetCreator:
                 speaker,
                 orig_sr,
             ) in tqdm(splitted_collection):
+                # [T]
                 wave, sample_rate = librosa.load(audio_file, sr=None, mono=True)
-                audio = tf.audio.encode_wav(
-                    tf.expand_dims(wave, axis=-1), sample_rate=sample_rate
-                )
+                # [T, 1]
+                wave_with_channel = tf.expand_dims(wave, axis=-1)
+                audio = tf.audio.encode_wav(wave_with_channel, sample_rate=sample_rate)
 
                 encoded_text_tokens = " ".join([str(token) for token in text_tokens])
 
@@ -225,7 +232,7 @@ class DatasetCreator:
                             "audio": tf.train.Feature(
                                 bytes_list=tf.train.BytesList(value=[audio.numpy()])
                             ),
-                            "label": tf.train.Feature(
+                            "text_tokens": tf.train.Feature(
                                 bytes_list=tf.train.BytesList(
                                     value=[bytes(encoded_text_tokens, "utf-8")]
                                 )
@@ -237,7 +244,5 @@ class DatasetCreator:
                 out.write(example.SerializeToString())
 
                 num_samples += 1
-
-            out.close()
 
         return num_samples
