@@ -4,8 +4,9 @@ __pycache__
 # pytest related
 .pytest_cache
 
-# hydra related
+# tensorflow related
 outputs
+checkpoints
 
 # sphinx related
 docs/_build/doctrees

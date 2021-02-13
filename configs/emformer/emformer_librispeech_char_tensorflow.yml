@@ -5,10 +5,10 @@ trainer:
   workers: 1
   run_eagerly: true
   model_checkpoint:
-    filepath: tensorflow_checkpoints
+    filepath: checkpoints
     save_best_only: true
   tensorboard:
-    log_dir: tensorflow_outputs
+    log_dir: outputs
   precision:
     name: mixed_float16
 
