@@ -10,15 +10,15 @@ from modules.subsample import VggSubsample, stack_subsample
 class EmformerEncoder(tf.keras.layers.Layer):
     def __init__(
         self,
-        subsampling: str,
-        subsampling_factor: int,
-        subsampling_dim: int,
         feat_in: int,
         num_layers: int,
         num_heads: int,
         dim_model: int,
         dim_ffn: int,
         dropout_attn: int,
+        subsampling: str,
+        subsampling_factor: int,
+        subsampling_dim: int,  # conv channels. used for vgg susampling
         left_length: int,
         chunk_length: int,
         right_length: int,
@@ -159,7 +159,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
         for i in range(bs):
-            print(audio_lens)
             max_len = audio_lens[i]
 
             # 4.1 pad mask_body

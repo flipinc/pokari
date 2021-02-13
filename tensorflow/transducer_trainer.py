@@ -3,20 +3,23 @@ from hydra.experimental import compose, initialize
 import tensorflow as tf
 from models.transducer import Transducer
 
-initialize(config_path="configs/emformer", job_name="emformer")
-cfg = compose(config_name="emformer_librispeech_char.yaml")
+if __name__ == "__main__":
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfg = compose(config_name="emformer_librispeech_char_tensorflow.yml")
 
-tf.keras.backend.clear_session()
+    tf.keras.backend.clear_session()
 
-policy = tf.mixed_precision.Policy("mixed_float16")
-tf.mixed_precision.set_global_policy(policy)
+    if "precision" in cfg:
+        tf.mixed_precision.set_global_policy(
+            tf.mixed_precision.Policy(**cfg["precision"])
+        )
 
-strategy = None
+    strategy = tf.distribute.MirroredStrategy()
 
-# TODO: fix https://github.com/tensorflow/tensorflow/issues/44777
-# seems like LD_LIBRARY_PATH is the root cause
+    with strategy.scope():
+        num_replicas = strategy.num_replicas_in_sync
+        cfg.train_ds.batch_size *= num_replicas
+        cfg.validation_ds.batch_size *= num_replicas
 
-with strategy.scope():
-    model = Transducer(cfg=cfg.model)
-    model.summary()
-    model.train(cfg=cfg.trainer)
+        model = Transducer(cfg=cfg)
+        model.train(num_replicas=num_replicas)

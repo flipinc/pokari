@@ -346,8 +346,6 @@ class AudioToMelSpectrogramPreprocessor(nn.Module):
         if self.mag_power != 1.0:
             x = x.pow(self.mag_power)
 
-        print(self.fb.size(), x.size())
-
         # dot with filterbank energies
         x = torch.matmul(self.fb.to(x.dtype), x)
 

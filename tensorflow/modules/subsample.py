@@ -60,7 +60,9 @@ class VggSubsample(tf.keras.layers.Layer):
                 tf.keras.layers.MaxPool2D(
                     pool_size=self.pool_kernel_size,
                     strides=self.pool_stride,
-                    padding="valid",
+                    # according to  pytorch implementation, this should be "valid"
+                    # but, length will be incorrect
+                    padding="same",
                 )
             )
 
@@ -77,13 +79,6 @@ class VggSubsample(tf.keras.layers.Layer):
             / float(self.pool_stride)
             + 1
         )
-
-    # def calc_tensor_length(self, in_length: tf.Tensor):
-    #     return tf.math.ceil(
-    #         (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
-    #         / float(self.pool_stride)
-    #         + 1
-    #     )
 
     def call(self, audio_signals: tf.Tensor, audio_lens: np.array):
         """

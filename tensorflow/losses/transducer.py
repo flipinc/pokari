@@ -1,9 +1,10 @@
+import numpy as np
 import tensorflow as tf
 from warprnnt_tensorflow import rnnt_loss as warp_rnnt_loss
 
 
 class TransducerLoss(tf.keras.losses.Loss):
-    def __init__(self, vocab_size, reduction="mean_batch"):
+    def __init__(self, vocab_size):
         """
         RNN-T Loss function based on https://github.com/HawkAaron/warp-transducer.
 
@@ -36,69 +37,40 @@ class TransducerLoss(tf.keras.losses.Loss):
         """
         super().__init__()
 
-        if reduction not in [None, "mean", "sum", "mean_batch"]:
-            raise ValueError("`reduction` must be one of [mean, sum, mean_batch]")
+        self.blank = vocab_size
 
-        self._blank = vocab_size
-        self.reduction = reduction
+    def call(self, log_probs, targets, encoded_lens, decoded_lens):
+        bs = log_probs.shape[0]
 
-    def forward(self, log_probs, targets, encoded_lens, decoded_lens):
+        max_logit_len = np.amax(encoded_lens)
+        max_targets_len = np.amax(decoded_lens)
+
+        # TODO(keisuke): if mismatches, align shapes just like in pytorch implementation
+        if log_probs.shape[1] != max_logit_len:
+            raise ValueError("The shape of log_probs and max_len does not match.")
+
+        # TODO(keisuke): if mismatches, align shapes just like in pytorch implementation
+        if targets.shape[1] != max_targets_len:
+            raise ValueError("The shape of targets and max_len does not match.")
+
         # Cast to int 32
         targets = tf.cast(targets, tf.int32)
         encoded_lens = tf.convert_to_tensor(encoded_lens, tf.int32)
         decoded_lens = tf.convert_to_tensor(decoded_lens, tf.int32)
 
-        max_logit_len = encoded_lens.max()
-        max_targets_len = decoded_lens.max()
-
         # Force cast joint to float32
         if log_probs.dtype != tf.float32:
             log_probs = tf.cast(log_probs, tf.float32)
-
-        # Ensure that shape mismatch does not occur due to padding
-        # Due to padding and subsequent downsampling, it may be possible that
-        # max sequence length computed does not match the actual max sequence length
-        # of the log_probs tensor, therefore we increment the encoded_lens by the
-        # difference. This difference is generally small.
-        print(log_probs.shape[1], max_logit_len)
-        if log_probs.shape[1] != max_logit_len:
-            log_probs = log_probs.narrow(
-                dim=1, start=0, length=max_logit_len
-            ).contiguous()
-
-        # Reduce transcript length to correct alignment if additional padding was
-        # applied.
-        # Transcript: [B, L] -> [B, L']; If L' < L
-        if targets.shape[1] != max_targets_len:
-            targets = targets.narrow(dim=1, start=0, length=max_targets_len)
-
-        # Loss reduction can be dynamic, so set it prior to call
-        if self.reduction != "mean_batch":
-            self._loss.reduction = self.reduction
 
         # Compute RNNT loss
         loss = warp_rnnt_loss(
             acts=log_probs,
             labels=targets,
-            act_lens=encoded_lens,
-            label_lens=decoded_lens,
-            blank_label=self._blank,
+            input_lengths=encoded_lens,
+            label_lengths=decoded_lens,
+            blank_label=self.blank,
         )
 
-        # Loss reduction can be dynamic, so reset it after call
-        if self.reduction != "mean_batch":
-            self._loss.reduction = "none"
-
-        # Loss reduction only for mean_batch mode
-        if self.reduction == "mean_batch":
-            loss = torch.mean(loss)
-
-        # del new variables that may have been created
-        del (
-            log_probs,
-            targets,
-            encoded_lens,
-            decoded_lens,
-        )
+        loss = tf.nn.compute_average_loss(loss, global_batch_size=bs)
 
         return loss

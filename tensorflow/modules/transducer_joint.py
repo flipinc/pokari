@@ -1,14 +1,14 @@
 import tensorflow as tf
 
 
-class TrasducerJoint(tf.keras.layers.Layer):
+class TransducerJoint(tf.keras.layers.Layer):
     def __init__(
         self,
         encoder_hidden: int,
         predictor_hidden: int,
         dim_model: int,
-        vocab_size: int,
         activation: str,
+        vocab_size: int,
     ):
         super().__init__()
 

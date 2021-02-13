@@ -5,44 +5,6 @@ import tensorflow_addons as tfa
 from utils.util import label_collate
 
 
-class LSTMLayerNorm(tf.keras.layers.Layer):
-    def __init__(self, num_layers: int, dim_model: int):
-        super().__init__()
-
-        self.layers = []
-        for i in range(num_layers):
-            lstm_cell = tfa.rnn.LayerNormLSTMCell(units=dim_model)
-            lstm_rnn = tf.keras.layers.RNN(
-                lstm_cell, return_sequences=True, return_state=True
-            )
-            self.layers.append(lstm_rnn)
-
-    def call(self, inputs, states=None):
-        """
-
-        N: number of layers
-
-        Args:
-            inputs: [B, U, D]
-            states: [N, B, D]
-
-        """
-        new_states = tf.TensorArray(
-            self.dtype, size=len(self.layers), clear_after_read=True
-        )
-
-        outputs = inputs
-        del inputs
-
-        for i, layer in enumerate(self.layers):
-            (outputs, h, c) = layer(outputs, states[i])
-            new_states = new_states.write(i, (h, c))
-
-        new_states = new_states.stack()
-
-        return outputs, new_states
-
-
 class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
         self,
@@ -50,11 +12,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         embed_dim: int,
         dim_model: int,
         vocab_size: int,
-        normalization_mode: Optional[str] = None,
         random_state_sampling: bool = False,
-        t_max: int = None,
-        forget_gate_bias: int = 1.0,
-        dropout: int = 0.0,
     ):
         super().__init__()
 
@@ -74,7 +32,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self,
         targets,
         states: Optional[Tuple[tf.Tensor, tf.Tensor]] = None,
-        training=True,
+        training: bool = True,
     ):
         # y: (B, U)
         y = label_collate(targets)
@@ -210,3 +168,41 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 states.append(state)
 
         return states
+
+
+class LSTMLayerNorm(tf.keras.layers.Layer):
+    def __init__(self, num_layers: int, dim_model: int):
+        super().__init__()
+
+        self.layers = []
+        for i in range(num_layers):
+            lstm_cell = tfa.rnn.LayerNormLSTMCell(units=dim_model)
+            lstm_rnn = tf.keras.layers.RNN(
+                lstm_cell, return_sequences=True, return_state=True
+            )
+            self.layers.append(lstm_rnn)
+
+    def call(self, inputs, states=None):
+        """
+
+        N: number of layers
+
+        Args:
+            inputs: [B, U, D]
+            states: [N, B, D]
+
+        """
+        new_states = tf.TensorArray(
+            self.dtype, size=len(self.layers), clear_after_read=True
+        )
+
+        outputs = inputs
+        del inputs
+
+        for i, layer in enumerate(self.layers):
+            (outputs, h, c) = layer(outputs, states[i])
+            new_states = new_states.write(i, (h, c))
+
+        new_states = new_states.stack()
+
+        return outputs, new_states
