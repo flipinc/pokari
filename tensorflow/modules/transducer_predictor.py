@@ -19,12 +19,13 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.dim_model = dim_model
         self.embed_dim = embed_dim
         self.num_layers = num_layers
-        self.blank_idx = vocab_size
+        self.blank_idx = 0
 
         self.random_state_sampling = random_state_sampling
 
-        # TODO: set mask_zero. in order to do this, every idx must be incremented by 1
-        self.embed = tf.keras.layers.Embedding(vocab_size + 1, embed_dim)
+        self.embed = tf.keras.layers.Embedding(
+            vocab_size + 1, embed_dim, mask_zero=True
+        )
 
         self.rnn = LSTMLayerNorm(num_layers, dim_model)
 
@@ -39,12 +40,12 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         # state maintenance is unnecessary during training forward call
         # to get state, use .predict() method.
-        g, _ = self.predict(
+        out, _ = self.predict(
             y, state=states, add_sos=True, training=training
         )  # (B, U, D)
-        g = tf.transpose(g, (0, 2, 1))  # (B, D, U)
+        out = tf.transpose(out, (0, 2, 1))  # (B, D, U)
 
-        return g
+        return out
 
     def predict(
         self,
@@ -132,9 +133,9 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 state = self.initialize_state(y, training)
 
         # Forward step through RNN
-        g, hid = self.rnn(y, state)
+        out, state = self.rnn(y, state)
 
-        return g, hid
+        return out, state
 
     def initialize_state(self, y, training: bool = True):
         b = tf.shape(y)[0]

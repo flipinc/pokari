@@ -49,7 +49,7 @@ class TransducerPredictor(nn.Module):
         num_layers: int,
         embed_dim: int,
         dim_model: int,
-        vocab_size: int,
+        : int,
         normalization_mode: Optional[str] = None,
         random_state_sampling: bool = False,
         t_max: int = None,

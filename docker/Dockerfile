@@ -1,6 +1,6 @@
-# as of 20212/13, `latest` has some bugs related to RTX 3090 configuration
-# however, changing to nightly will cause some bugs in warprnnt
-FROM tensorflow/tensorflow:latest-gpu
+# as of 2021/2/13, `latest` has some bugs related to RTX 3090 configuration
+# FROM tensorflow/tensorflow:nightly-gpu
+FROM nvcr.io/nvidia/tensorflow:20.12-tf2-py3
 
 # install sndfile library
 RUN apt-get update && \
@@ -10,30 +10,16 @@ RUN apt-get update && \
     portaudio19-dev \
     libsndfile1-dev
 
-# install git
-RUN apt-get update && \
-    apt-get -y install \
-    git
-
-# install cmake
-RUN apt-get update && \
-    apt-get -y install \
-    cmake protobuf-compiler
-
-# install nano
-RUN apt-get update && \
-    apt-get -y install \
-    nano
-
-# see https://github.com/psf/black/issues/1707
+WORKDIR /tmp/pokari
+# see https://github.com/psf/black/issues/1707. tensorflow official docker image works fine
 RUN pip uninstall -y typing
-
 # install pokari dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+# see https://github.com/tensorflow/tensorflow/issues/43947
+RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcusolver.so.11 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcusolver.so.10
+RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcupti.so.11.1 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcupti.so.11.0
+
 WORKDIR /workspace/pokari
 COPY . .
-
-
-

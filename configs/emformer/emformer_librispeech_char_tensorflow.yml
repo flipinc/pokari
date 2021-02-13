@@ -1,9 +1,9 @@
 trainer:
   epochs: 100
   max_queue_size: 10
-  use_multiprocessing: false
-  workers: 1
-  run_eagerly: true
+  use_multiprocessing: true
+  workers: 4
+  run_eagerly: false
   model_checkpoint:
     filepath: checkpoints
     save_best_only: true

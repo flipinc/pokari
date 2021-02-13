@@ -353,7 +353,7 @@ def warp_rnnt_loss(logits, labels, label_length, logit_length, name=None):
 
 
 class TransducerLoss(tf.keras.losses.Loss):
-    def __init__(self, batch_size, vocab_size):
+    def __init__(self):
         """
         RNN-T Loss function based on https://github.com/HawkAaron/warp-transducer.
 
@@ -386,14 +386,10 @@ class TransducerLoss(tf.keras.losses.Loss):
         """
         super().__init__(reduction=tf.keras.losses.Reduction.NONE)
 
-        self.batch_size = batch_size
-        self.blank = vocab_size
+    def call(self, joint_outputs, others):
+        encoded_lens, targets, decoded_lens = others
 
-    def call(self, y_true, y_pred):
-        log_probs, encoded_lens = y_true
-        targets, decoded_lens = y_pred
-
-        # TODO(keisuke): if length mismatches between log_probs <-> decoded_lens or
+        # TODO(keisuke): if length mismatches between joint_outputs <-> decoded_lens or
         # targets <-> encoded_lens, align shapes just like in pytorch implementation
 
         # Cast to int 32
@@ -405,17 +401,17 @@ class TransducerLoss(tf.keras.losses.Loss):
             decoded_lens = tf.cast(decoded_lens, tf.int32)
 
         # Force cast joint to float32
-        if log_probs.dtype != tf.float32:
-            log_probs = tf.cast(log_probs, tf.float32)
+        if joint_outputs.dtype != tf.float32:
+            joint_outputs = tf.cast(joint_outputs, tf.float32)
 
         # Compute RNNT loss
         loss = warp_rnnt_loss(
-            logits=log_probs,
+            logits=joint_outputs,
             labels=targets,
             logit_length=encoded_lens,
             label_length=decoded_lens,
         )
 
-        loss = tf.nn.compute_average_loss(loss, global_batch_size=self.batch_size)
+        loss = tf.nn.compute_average_loss(loss)
 
         return loss

@@ -135,35 +135,35 @@ class DatasetCreator:
         return dataset, num_samples
 
     def collate_fn(self, tf_record: tf.Tensor):
-        result = tf.io.parse_single_example(
-            tf_record,
-            features={
-                "audio": tf.io.FixedLenFeature([], tf.string),
-                "text_tokens": tf.io.FixedLenFeature([], tf.string),
-            },
-        )
-
-        audio = result["audio"]
-        audio, sample_rate = tf.audio.decode_wav(
-            audio, desired_channels=1, desired_samples=-1
-        )
-        audio = tfio.audio.resample(
-            audio,
-            rate_in=tf.cast(sample_rate, dtype=tf.int64),
-            rate_out=self.sample_rate,
-        )
-        # remove dimension added by ByteList (not 100% sure) and channel dimension
-        audio = tf.squeeze(audio)
-        audio_len = tf.cast(tf.shape(audio)[0], tf.int32)
-
-        transcript = result["text_tokens"]
-        # remove dimension added by ByteList (not 100% sure)
-        transcript = tf.squeeze(transcript)
-        transcript = tf.strings.to_number(
-            tf.strings.split(transcript), out_type=tf.int32
-        )
-
         with tf.device("/CPU:0"):
+            result = tf.io.parse_single_example(
+                tf_record,
+                features={
+                    "audio": tf.io.FixedLenFeature([], tf.string),
+                    "text_tokens": tf.io.FixedLenFeature([], tf.string),
+                },
+            )
+
+            audio = result["audio"]
+            audio, sample_rate = tf.audio.decode_wav(
+                audio, desired_channels=1, desired_samples=-1
+            )
+            audio = tfio.audio.resample(
+                audio,
+                rate_in=tf.cast(sample_rate, dtype=tf.int64),
+                rate_out=self.sample_rate,
+            )
+            # remove dimension added by ByteList (not 100% sure) and channel dimension
+            audio = tf.squeeze(audio)
+            audio_len = tf.cast(tf.shape(audio)[0], tf.int32)
+
+            transcript = result["text_tokens"]
+            # remove dimension added by ByteList (not 100% sure)
+            transcript = tf.squeeze(transcript)
+            transcript = tf.strings.to_number(
+                tf.strings.split(transcript), out_type=tf.int32
+            )
+
             audio = self.augmentor.perturb(audio)
 
             transcript_len = tf.cast(tf.shape(transcript)[0], tf.int32)
