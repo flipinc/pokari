@@ -241,7 +241,7 @@ class Transducer(tf.keras.Model):
         # TODO: compute wer & cer for every n step
         # TODO: log wer & cer & loss & lr
 
-        return {"train_loss": loss, "learning_rate": None}
+        return {"train_loss": loss}
 
     def test_step(self, batch):
         _, _, transcripts, _ = batch
