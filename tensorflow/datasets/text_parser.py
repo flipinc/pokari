@@ -18,7 +18,6 @@ class CharParser:
     def __init__(
         self,
         labels: List[str],
-        *,
         unk_id: int = -1,
         ignore_id: int = -1,
         do_normalize: bool = True,
@@ -44,7 +43,8 @@ class CharParser:
         self._do_normalize = do_normalize
         self._do_lowercase = do_lowercase
 
-        self._labels_map = {label: index for index, label in enumerate(labels)}
+        # idx zero is preserved for blank_idx (= Transducer only)
+        self._labels_map = {label: idx + 1 for idx, label in enumerate(labels)}
         self._special_labels = set([label for label in labels if len(label) > 1])
 
     def __call__(self, text: str) -> Optional[List[int]]:

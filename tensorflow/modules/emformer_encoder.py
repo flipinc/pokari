@@ -140,7 +140,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                     right_indexes,
                     tf.range(end_offset, end_offset + this_right_length),
                 ]
-            )
+            ).astype("int32")
 
             mask_left[
                 :,
@@ -190,22 +190,22 @@ class EmformerEncoder(tf.keras.layers.Layer):
     def stream(
         self,
         audio_signals: tf.Tensor,
-        audio_lens: np.array,
+        audio_lens: tf.Tensor,
         cache_k: Optional[tf.Tensor] = None,
         cache_v: Optional[tf.Tensor] = None,
     ):
-        bs = audio_signals.shape[0]
+        bs = tf.shape(audio_signals)[0]
 
         if bs > 1:
-            max_len = np.amax(audio_lens)
-            min_len = np.amin(audio_lens)
+            max_len = tf.math.reduce_max(audio_lens)
+            min_len = tf.math.reduce_min(audio_lens)
             if max_len != min_len:
                 raise ValueError(
                     "In streaming mode, all audio lens must be equal if batch size > 1"
                 )
 
         # 1. projection
-        x = tf.transpose(audio_signals, [0, 2, 1])
+        x = tf.transpose(audio_signals, (0, 2, 1))
         x = self.linear(x)
 
         # 2. vgg subsampling
@@ -215,12 +215,13 @@ class EmformerEncoder(tf.keras.layers.Layer):
             x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create padding mask
-        segment_length = x.shape[1]
-        mask = self.create_stream_mask(audio_lens, segment_length)
+        segment_length = tf.shape(x)[1]
+        mask = tf.numpy_function(
+            self.create_stream_mask, [audio_lens, segment_length], [tf.bool]
+        )
 
         # 4. loop over layers while saving cache at the same time
         if cache_k is None or cache_v is None:
-            bs = audio_signals.shape[0]
             # alternatively, this can be a list of size [B, L, Head, Dim] x num_layer
             # but for simplicity, everything is packed in tf.Tensor
             cache_k = cache_v = tf.zeros(
@@ -250,13 +251,13 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. Trim right context
         x = x[:, : self.chunk_length, :]
-        x = tf.transpose(x, [0, 2, 1])
+        x = tf.transpose(x, (0, 2, 1))
 
         new_audio_lens = tf.repeat(self.chunk_length, [bs])
 
         return x, new_audio_lens, new_cache_k, new_cache_v
 
-    def full_context(self, audio_signals: tf.Tensor, audio_lens: np.array):
+    def full_context(self, audio_signals: tf.Tensor, audio_lens: tf.Tensor):
         # 1. projection
         x = tf.transpose(audio_signals, [0, 2, 1])
         x = self.linear(x)
@@ -408,14 +409,14 @@ class EmformerBlock(tf.keras.layers.Layer):
             cache_k (tf.Tensor): [N, B, H, L, D/H]
             cache_v (tf.Tensor): [N, B, H, L, D/H]
         """
-        bs = input.shape[0]
+        bs = tf.shape(input)[0]
 
         # 1. apply layer norm
         input = self.ln_in(input)
 
         # 2. calculate q -> [B, H, C+R, D]
         q = tf.reshape(self.linear_q(input), (bs, -1, self.num_heads, self.d_k))
-        q = tf.transpose(q, [0, 2, 1, 3])
+        q = tf.transpose(q, (0, 2, 1, 3))
 
         # 3. calculate k and v -> [B, H, L+C+R, D]
         k_cr = tf.reshape(self.linear_k(input), (bs, -1, self.num_heads, self.d_k))
@@ -424,14 +425,14 @@ class EmformerBlock(tf.keras.layers.Layer):
         new_cache_k = k[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
-        k = tf.transpose(k, [0, 2, 1, 3])
+        k = tf.transpose(k, (0, 2, 1, 3))
 
         v_cr = tf.reshape(self.linear_v(input), (bs, -1, self.num_heads, self.d_k))
         v = tf.concat([cache_v, v_cr], axis=1)
         new_cache_v = v[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
-        v = tf.transpose(v, [0, 2, 1, 3])
+        v = tf.transpose(v, (0, 2, 1, 3))
 
         output = self.attend(input, q, k, v, mask)
 

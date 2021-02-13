@@ -77,9 +77,7 @@ class Transducer(tf.keras.Model):
         #     dist_sync_on_step=True,
         # )
 
-        loss = TransducerLoss(
-            batch_size=cfg.train_ds.batch_size, vocab_size=len(self.labels)
-        )
+        loss = TransducerLoss()
 
         optim_cfg = OmegaConf.to_container(cfg.optimizer)
 
@@ -211,7 +209,7 @@ class Transducer(tf.keras.Model):
         )
 
     def train_step(self, batch):
-        audio, _, transcripts, transcript_lens = batch
+        _, _, transcripts, transcript_lens = batch
 
         with tf.GradientTape() as tape:
             (
@@ -222,7 +220,7 @@ class Transducer(tf.keras.Model):
             ) = self(batch, training=True)
 
             loss = self.loss(
-                (joint_outputs, encoded_lens), (transcripts, transcript_lens)
+                joint_outputs, (encoded_lens, transcripts, transcript_lens)
             )
 
             if self.mixed_precision_enabled:

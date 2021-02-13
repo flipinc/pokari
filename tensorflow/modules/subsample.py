@@ -77,15 +77,18 @@ class VggSubsample(tf.keras.layers.Layer):
     def calc_length(self, in_length: int):
         return math.ceil(
             (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
-            / float(self.pool_stride)
+            / self.pool_stride
             + 1
         )
 
     def calc_tensor_length(self, in_length: tf.Tensor):
-        return tf.math.ceil(
-            (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
-            / float(self.pool_stride)
-            + 1
+        return tf.cast(
+            tf.math.ceil(
+                (in_length + (2 * self.pool_padding) - (self.pool_kernel_size - 1) - 1)
+                / self.pool_stride
+                + 1
+            ),
+            tf.int32,
         )
 
     def call(self, audio_signals: tf.Tensor, audio_lens: tf.Tensor):

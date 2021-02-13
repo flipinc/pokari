@@ -70,7 +70,7 @@ class AudioToMelSpectrogramPreprocessor:
         x = audio_signals
         del audio_signals
 
-        audio_lens = tf.math.ceil(audio_lens / self.hop_length)
+        audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
 
         # dither
         if self.dither > 0:
@@ -116,7 +116,7 @@ class AudioToMelSpectrogramPreprocessor:
 
         # normalize if required
         if self.normalize_type is not None:
-            x = self.normalize_batch(x, tf.cast(audio_lens, tf.int32))
+            x = self.normalize_batch(x, audio_lens)
 
         # TODO: pad to multiple of 8 for efficient tensor core use
 
