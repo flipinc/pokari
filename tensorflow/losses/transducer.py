@@ -1,10 +1,9 @@
-import numpy as np
 import tensorflow as tf
 from warprnnt_tensorflow import rnnt_loss as warp_rnnt_loss
 
 
 class TransducerLoss(tf.keras.losses.Loss):
-    def __init__(self, vocab_size):
+    def __init__(self, batch_size, vocab_size):
         """
         RNN-T Loss function based on https://github.com/HawkAaron/warp-transducer.
 
@@ -35,28 +34,25 @@ class TransducerLoss(tf.keras.losses.Loss):
                 `sum` or None. None will return a torch vector comprising the individual
                 loss values of the batch.
         """
-        super().__init__()
+        super().__init__(reduction=tf.keras.losses.Reduction.NONE)
 
+        self.batch_size = batch_size
         self.blank = vocab_size
 
-    def call(self, log_probs, targets, encoded_lens, decoded_lens):
-        bs = log_probs.shape[0]
+    def call(self, y_true, y_pred):
+        log_probs, encoded_lens = y_true
+        targets, decoded_lens = y_pred
 
-        max_logit_len = np.amax(encoded_lens)
-        max_targets_len = np.amax(decoded_lens)
-
-        # TODO(keisuke): if mismatches, align shapes just like in pytorch implementation
-        if log_probs.shape[1] != max_logit_len:
-            raise ValueError("The shape of log_probs and max_len does not match.")
-
-        # TODO(keisuke): if mismatches, align shapes just like in pytorch implementation
-        if targets.shape[1] != max_targets_len:
-            raise ValueError("The shape of targets and max_len does not match.")
+        # TODO(keisuke): if length mismatches between log_probs <-> decoded_lens or
+        # targets <-> encoded_lens, align shapes just like in pytorch implementation
 
         # Cast to int 32
-        targets = tf.cast(targets, tf.int32)
-        encoded_lens = tf.convert_to_tensor(encoded_lens, tf.int32)
-        decoded_lens = tf.convert_to_tensor(decoded_lens, tf.int32)
+        if targets.dtype != tf.float32:
+            targets = tf.cast(targets, tf.int32)
+        if encoded_lens.dtype != tf.float32:
+            encoded_lens = tf.cast(encoded_lens, tf.int32)
+        if decoded_lens.dtype != tf.float32:
+            decoded_lens = tf.cast(decoded_lens, tf.int32)
 
         # Force cast joint to float32
         if log_probs.dtype != tf.float32:
@@ -71,6 +67,6 @@ class TransducerLoss(tf.keras.losses.Loss):
             blank_label=self.blank,
         )
 
-        loss = tf.nn.compute_average_loss(loss, global_batch_size=bs)
+        loss = tf.nn.compute_average_loss(loss, global_batch_size=self.batch_size)
 
         return loss

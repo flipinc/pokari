@@ -65,6 +65,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
         audio_lens: np.array,
         segment_length: int,
     ):
+        audio_lens = audio_lens.astype("int32")
+
         bs = audio_lens.shape[0]
         mask = np.zeros([bs, segment_length, segment_length + self.left_length])
 
@@ -78,9 +80,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         mask = np.expand_dims(mask, axis=1)
 
-        mask = tf.convert_to_tensor(mask == 0, dtype=tf.bool)
-
-        return mask
+        return mask == 0
 
     def create_mask(self, audio_lens: np.array, t_max: int):
         """Emformer attention mask
@@ -98,6 +98,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
             t_max (int): this cannot be inferred by audio_lens because longest input_len
                 may be padded for efficiency
         """
+        audio_lens = audio_lens.astype("int32")
+
         bs = audio_lens.shape[0]
         num_chunks = math.ceil(t_max / self.chunk_length)
 
@@ -183,9 +185,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        mask = tf.convert_to_tensor(mask == 0, dtype=tf.bool)
-
-        return mask, right_indexes
+        return mask == 0, right_indexes
 
     def stream(
         self,
@@ -268,8 +268,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
             x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create attention mask
-        t_new = x.shape[1]
-        mask, right_indexes = self.create_mask(audio_lens, t_new)
+        t_new = tf.shape(x)[1]
+        mask, right_indexes = tf.numpy_function(
+            self.create_mask, [audio_lens, t_new], [tf.bool, tf.int32]
+        )
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
@@ -356,7 +358,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         v: tf.Tensor,
         mask: tf.Tensor,
     ):
-        bs = q.shape[0]
+        bs = tf.shape(q)[0]
 
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
         attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
@@ -436,7 +438,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         return output, (new_cache_k, new_cache_v)
 
     def full_context(self, input: tf.Tensor, mask: tf.Tensor):
-        bs = input.shape[0]
+        bs = tf.shape(input)[0]
 
         # 1. perform layer norm
         input = self.ln_in(input)
@@ -478,7 +480,7 @@ class EmformerBlock(tf.keras.layers.Layer):
             return self.full_context(input, mask)
         elif mode == "stream":
             if cache_k is None or cache_v is None:
-                bs = input.shape[0]
+                bs = tf.shape(input)[0]
                 cache_k = cache_v = tf.zeros(
                     [
                         bs,

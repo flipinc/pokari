@@ -3,6 +3,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   workers: 1
+  run_eagerly: true
   model_checkpoint:
     filepath: tensorflow_checkpoints
     save_best_only: true
@@ -106,9 +107,6 @@ spec_augment:
   time_masks: 2
   freq_width: 15
   time_width: 25
-  rect_masks: 5
-  rect_time: 25
-  rect_freq: 15
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder

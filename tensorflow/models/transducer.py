@@ -77,7 +77,9 @@ class Transducer(tf.keras.Model):
         #     dist_sync_on_step=True,
         # )
 
-        loss = TransducerLoss(vocab_size=len(self.labels))
+        loss = TransducerLoss(
+            batch_size=cfg.train_ds.batch_size, vocab_size=len(self.labels)
+        )
 
         optim_cfg = OmegaConf.to_container(cfg.optimizer)
 
@@ -115,7 +117,9 @@ class Transducer(tf.keras.Model):
         if self.mixed_precision_enabled:
             optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
 
-        super(Transducer, self).compile(optimizer=optimizer, loss=loss)
+        super(Transducer, self).compile(
+            optimizer=optimizer, loss=loss, run_eagerly=cfg.trainer.run_eagerly
+        )
 
         self.trainer_cfg = OmegaConf.to_container(cfg.trainer)
         self.postprocessor_cfg = OmegaConf.to_container(cfg.postprocessor)
@@ -176,8 +180,8 @@ class Transducer(tf.keras.Model):
             callbacks=callbacks,
         )
 
-    def call(self, batch, training=False):
-        audio_signals, audio_lens, transcripts, transcript_lens = batch
+    def call(self, batch, training):
+        audio_signals, audio_lens, transcripts, _ = batch
 
         audio_signals, audio_lens = self.preprocessor(
             audio_signals=audio_signals,
@@ -192,10 +196,8 @@ class Transducer(tf.keras.Model):
         )
         del audio_signals, audio_lens
 
-        decoded_targets, decoded_lens = self.predictor(
-            targets=transcripts, target_lens=transcript_lens
-        )
-        del transcripts, transcript_lens
+        decoded_targets = self.predictor(targets=transcripts)
+        del transcripts
 
         joint_outputs = self.joint(
             encoder_outputs=encoded_signals, predictor_outputs=decoded_targets
@@ -205,28 +207,22 @@ class Transducer(tf.keras.Model):
             encoded_signals,
             encoded_lens,
             decoded_targets,
-            decoded_lens,
             joint_outputs,
         )
 
-    @tf.function
     def train_step(self, batch):
-        _, _, transcripts, _ = batch
+        audio, _, transcripts, transcript_lens = batch
 
         with tf.GradientTape() as tape:
             (
                 _,
                 encoded_lens,
                 _,
-                decoded_lens,
                 joint_outputs,
-            ) = self(batch)
+            ) = self(batch, training=True)
 
             loss = self.loss(
-                log_probs=joint_outputs,
-                targets=transcripts,
-                encoded_lens=encoded_lens,
-                decoded_lens=decoded_lens,
+                (joint_outputs, encoded_lens), (transcripts, transcript_lens)
             )
 
             if self.mixed_precision_enabled:
@@ -247,7 +243,6 @@ class Transducer(tf.keras.Model):
 
         return {"train_loss": loss, "learning_rate": None}
 
-    @tf.function
     def test_step(self, batch):
         _, _, transcripts, _ = batch
 
@@ -257,7 +252,7 @@ class Transducer(tf.keras.Model):
             _,
             decoded_lens,
             joint_outputs,
-        ) = self(batch)
+        ) = self(batch, training=False)
 
         loss = self.loss(
             log_probs=joint_outputs,
