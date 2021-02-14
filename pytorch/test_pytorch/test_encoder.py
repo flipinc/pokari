@@ -24,7 +24,7 @@ cfg = OmegaConf.create(
 )
 
 
-class TestEmformer:
+class TestEmformerPytorch:
     def test_constructor(self):
         model = instantiate(cfg)
         assert isinstance(model, EmformerEncoder)
