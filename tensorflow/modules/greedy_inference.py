@@ -244,33 +244,62 @@ class GreedyInference(tf.keras.layers.Layer):
         """
         batch_idx = tf.constant(0, dtype=tf.int32)
         batch_size = tf.shape(encoded_outs)[0]
+        t_max = tf.shape(encoded_outs)[1]
 
         if states is None:
             states = self.predictor.initialize_state(batch_size, training=False)
 
-        def batch_loop_cond(_batch_idx, _labels, _states):
-            return tf.less(_batch_idx, batch_size)
+        # def batch_loop_cond(_batch_idx, _labels, _states):
+        #     return tf.less(_batch_idx, batch_size)
 
         labels = tf.TensorArray(size=batch_size, dtype=tf.int32)
         new_states = tf.TensorArray(size=batch_size, dtype=encoded_outs.dtype)
 
-        def batch_loop_body(_batch_idx, _labels, _new_states):
+        # def batch_loop_body(_batch_idx, _labels, _new_states):
+        #     _labels_one, _states_one = self._greedy_naive_decode(
+        #         encoded_outs[_batch_idx],
+        #         encoded_lens[_batch_idx],
+        #         states=tf.gather(states, [batch_idx], axis=2),
+        #     )
+
+        #     # TODO: do something better
+        #     # each batch may have different label length so pad to maximum length
+        #     _labels_one = tf.pad(
+        #         _labels_one,
+        #         paddings=[[0, self.max_symbols * t_max - tf.shape(_labels_one)[0]]],
+        #         mode="CONSTANT",
+        #         constant_values=self._blank_idx,
+        #     )
+
+        #     _labels = _labels.write(_batch_idx, _labels_one)
+        #     _new_states = _new_states.write(_batch_idx, _states_one)
+
+        #     return _batch_idx + 1, _labels, _new_states
+
+        # _, _labels, new_states = tf.while_loop(
+        #     batch_loop_cond,
+        #     batch_loop_body,
+        #     loop_vars=[batch_idx, labels, new_states],
+        # )
+
+        for batch_idx in tf.range(batch_size):
             _labels_one, _states_one = self._greedy_naive_decode(
-                encoded_outs[_batch_idx],
-                encoded_lens[_batch_idx],
+                encoded_outs[batch_idx],
+                encoded_lens[batch_idx],
                 states=tf.gather(states, [batch_idx], axis=2),
             )
 
-            _labels = _labels.write(_batch_idx, _labels_one)
-            _new_states = _new_states.write(_batch_idx, _states_one)
+            # TODO: do something better
+            # each batch may have different label length so pad to maximum length
+            _labels_one = tf.pad(
+                _labels_one,
+                paddings=[[0, self.max_symbols * t_max - tf.shape(_labels_one)[0]]],
+                mode="CONSTANT",
+                constant_values=self._blank_idx,
+            )
 
-            return _batch_idx + 1, _labels, _new_states
-
-        _, _labels, new_states = tf.while_loop(
-            batch_loop_cond,
-            batch_loop_body,
-            loop_vars=[batch_idx, labels, new_states],
-        )
+            labels = labels.write(batch_idx, _labels_one)
+            new_states = new_states.write(batch_idx, _states_one)
 
         return labels.stack(), new_states.stack()
 

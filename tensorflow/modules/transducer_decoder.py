@@ -12,7 +12,7 @@ class TransducerDecoder(tf.keras.layers.Layer):
         self.labels = [""] + labels
         self.inference = inference
 
-    # @tf.function
+    @tf.function
     def __call__(
         self,
         encoder_output: tf.Tensor,
@@ -30,7 +30,5 @@ class TransducerDecoder(tf.keras.layers.Layer):
         decoded_hypotheses = tf.gather_nd(
             self.labels, tf.expand_dims(hypotheses_list, axis=-1)
         )
-
-        print(decoded_hypotheses)
 
         return decoded_hypotheses, cache_rnn_state
