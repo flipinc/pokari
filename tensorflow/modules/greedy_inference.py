@@ -124,9 +124,6 @@ class GreedyInference(tf.keras.layers.Layer):
         causes are pred_step and joint_step. should do something about this
 
         """
-        time = tf.constant(0, dtype=tf.int32)
-        max_time = encoded_len
-
         labels = tf.TensorArray(
             dtype=tf.int32,
             size=0,
@@ -135,94 +132,42 @@ class GreedyInference(tf.keras.layers.Layer):
         )
         last_label = tf.fill([1, 1], self._blank_idx)
 
-        def blank_loop_cond(
-            _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
-        ):
-            anchor = tf.constant(0, dtype=tf.int32)
-            return tf.equal(is_blank, anchor) and tf.less(
-                symbols_added, self.max_symbols
-            )
-
-        def blank_loop_body(
-            _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
-        ):
-            if _time == 0 and symbols_added == 0:
-                decoded_out_t, next_states = self._pred_step(
-                    None, _states, batch_size=1
-                )
-            else:
-                # Perform batch step prediction of decoder, getting new states and
-                # scores ("g")
-                decoded_out_t, next_states = self._pred_step(
-                    _last_label, _states, batch_size=1
-                )
-
-            # Batched joint step - Output = [B, V + 1]
-            joint_out = self._joint_step(encoded_out_t, decoded_out_t)
-            logp = joint_out[:, 0, 0, :]  # [1, V + 1]
-
-            symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [1]
-
-            # TODO: should this be moved inside false_fn as recording blank_idx is
-            # unnecessary
-            _labels = _labels.write(_labels.size(), symbol_idx)
-
-            def true_fn():
-                is_blank = tf.constant(1, tf.int32)
-                return (
-                    _time,
-                    is_blank,
-                    symbols_added,
-                    _last_label,
-                    _labels,
-                    encoded_out_t,
-                    _states,
-                )
-
-            def false_fn():
-                _states = next_states
-                _last_label = tf.expand_dims(symbol_idx, axis=0)
-                return (
-                    _time,
-                    is_blank,
-                    symbols_added + 1,
-                    _last_label,
-                    _labels,
-                    encoded_out_t,
-                    _states,
-                )
-
-            return tf.cond(tf.equal(symbol_idx, self._blank_idx), true_fn, false_fn)
-
-        def time_loop_cond(_time, _last_label, _labels, _states):
-            return tf.less(_time, max_time)
-
-        def time_loop_body(_time, _last_label, _labels, _states):
-            encoded_out_t = tf.gather(encoded_out, tf.reshape(_time, shape=[1]))
+        time = tf.constant(0, dtype=tf.int32)
+        anchor = tf.constant(0, dtype=tf.int32)
+        for encoded_out_t in encoded_out:
             is_blank = tf.constant(0, tf.int32)
             symbols_added = tf.constant(0, tf.int32)
 
-            _, _, _, _last_label, _labels, _, _states = tf.while_loop(
-                blank_loop_cond,
-                blank_loop_body,
-                loop_vars=[
-                    _time,
-                    is_blank,
-                    symbols_added,
-                    _last_label,
-                    _labels,
-                    encoded_out_t,
-                    _states,
-                ],
-            )
+            while tf.equal(is_blank, anchor) and tf.less(
+                symbols_added, self.max_symbols
+            ):
+                if tf.equal(time, 0) and tf.equal(symbols_added, 0):
+                    decoded_out_t, next_states = self._pred_step(
+                        None, states, batch_size=1
+                    )
+                else:
+                    # Perform batch step prediction of decoder, getting new states and
+                    # scores ("g")
+                    decoded_out_t, next_states = self._pred_step(
+                        last_label, states, batch_size=1
+                    )
 
-            return _time + 1, _last_label, _labels, _states
+                # Batched joint step - Output = [B, V + 1]
+                joint_out = self._joint_step(
+                    tf.expand_dims(encoded_out_t, axis=0), decoded_out_t
+                )
+                logp = joint_out[:, 0, 0, :]  # [1, V + 1]
 
-        _, _, labels, states = tf.while_loop(
-            time_loop_cond,
-            time_loop_body,
-            loop_vars=[time, last_label, labels, states],
-        )
+                symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [1]
+
+                labels = labels.write(labels.size(), symbol_idx)
+
+                if tf.equal(symbol_idx, self._blank_idx):
+                    is_blank = tf.constant(1, tf.int32)
+                else:
+                    states = next_states
+                    last_label = tf.expand_dims(symbol_idx, axis=0)
+                    symbols_added += 1
 
         # [B, T, 1] -> [B, T]
         labels = tf.squeeze(labels.stack())
@@ -249,38 +194,8 @@ class GreedyInference(tf.keras.layers.Layer):
         if states is None:
             states = self.predictor.initialize_state(batch_size, training=False)
 
-        # def batch_loop_cond(_batch_idx, _labels, _states):
-        #     return tf.less(_batch_idx, batch_size)
-
         labels = tf.TensorArray(size=batch_size, dtype=tf.int32)
         new_states = tf.TensorArray(size=batch_size, dtype=encoded_outs.dtype)
-
-        # def batch_loop_body(_batch_idx, _labels, _new_states):
-        #     _labels_one, _states_one = self._greedy_naive_decode(
-        #         encoded_outs[_batch_idx],
-        #         encoded_lens[_batch_idx],
-        #         states=tf.gather(states, [batch_idx], axis=2),
-        #     )
-
-        #     # TODO: do something better
-        #     # each batch may have different label length so pad to maximum length
-        #     _labels_one = tf.pad(
-        #         _labels_one,
-        #         paddings=[[0, self.max_symbols * t_max - tf.shape(_labels_one)[0]]],
-        #         mode="CONSTANT",
-        #         constant_values=self._blank_idx,
-        #     )
-
-        #     _labels = _labels.write(_batch_idx, _labels_one)
-        #     _new_states = _new_states.write(_batch_idx, _states_one)
-
-        #     return _batch_idx + 1, _labels, _new_states
-
-        # _, _labels, new_states = tf.while_loop(
-        #     batch_loop_cond,
-        #     batch_loop_body,
-        #     loop_vars=[batch_idx, labels, new_states],
-        # )
 
         for batch_idx in tf.range(batch_size):
             _labels_one, _states_one = self._greedy_naive_decode(
