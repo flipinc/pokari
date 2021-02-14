@@ -86,10 +86,12 @@ class EmformerEncoder(tf.keras.layers.Layer):
         """Emformer attention mask
 
         There are four types of masks.
-        - mask_body: A mask that's used for transformer as normal
-        - mask_left: A mask for hard copied inputs that's used for right contexts.
-        - mark_right: Same as mask_left. It is just a transposed vector of mask_left.
-        - mark_diagnal: A diagnal mask used for hard copied right contexts.
+        - mask_body: A attention mask for every timestep.
+        - mask_left: A attention mask for every timestep. Hard copied
+            right contexts included.
+        - mark_right: A attention mask for hard copied right contexts.
+        - mark_diagnal: A attention mask for hard copied right contexts
+            with copied right contexts.
 
         Note: Only used during training.
 
@@ -103,12 +105,15 @@ class EmformerEncoder(tf.keras.layers.Layer):
         bs = audio_lens.shape[0]
         num_chunks = math.ceil(t_max / self.chunk_length)
 
-        mask_body = np.zeros([bs, t_max, t_max])
         # TODO: this is allocating more than what is actually required
-        mask_left = np.zeros([bs, t_max, (num_chunks - 1) * self.right_length])
+        upperbound_right_length = (num_chunks - 1) * self.right_length
+
+        mask_body = np.zeros([bs, t_max, t_max])
+        mask_left = np.zeros([bs, t_max, upperbound_right_length])
+        mask_diagnal = np.zeros([bs, upperbound_right_length, upperbound_right_length])
+        mask_right = np.zeros([bs, upperbound_right_length, t_max])
 
         right_indexes = np.zeros(0).astype("int32")
-        total_right_length = 0
         for i in range(num_chunks):
             # 1. mark diagnal and left chunks
             left_offset = (
@@ -135,6 +140,24 @@ class EmformerEncoder(tf.keras.layers.Layer):
             else:
                 this_right_length = t_max - end_offset
 
+            mask_left[
+                :,
+                start_offset : start_offset + self.chunk_length,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+            ] = 1
+
+            mask_diagnal[
+                :,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+            ] = 1
+
+            mask_right[
+                :,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+                left_offset:end_offset,
+            ] = 1
+
             right_indexes = np.concatenate(
                 [
                     right_indexes,
@@ -142,45 +165,35 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 ]
             ).astype("int32")
 
-            mask_left[
-                :,
-                start_offset : start_offset + self.chunk_length,
-                i * self.right_length : i * self.right_length + this_right_length,
-            ] = 1
-            total_right_length += this_right_length
-
-        # remove unused right masks
-        mask_left = mask_left[:, :, :total_right_length]
-
-        # 3. create a diagnal mask
+        # 3. remove unused right contexts
         right_size = len(right_indexes)
-        mask_diagnal = np.diag(np.ones(right_size))
-        mask_diagnal = np.expand_dims(mask_diagnal, axis=0)
-        mask_diagnal = np.tile(mask_diagnal, (bs, 1, 1))
+        mask_left = mask_left[:, :, :right_size]
+        mask_diagnal = mask_diagnal[:, :right_size, :right_size]
+        mask_right = mask_right[:, :right_size, :]
 
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
         for i in range(bs):
             max_len = audio_lens[i]
 
-            # 4.1 pad mask_body
+            # 4.1 pad mask_body and mask_right
             mask_body[i, :, max_len:] = 0
             mask_body[i, max_len:, :] = 0
+            mask_right[i, :, max_len:] = 0
 
             to_be_padded = right_indexes[np.nonzero(right_indexes >= max_len)]
             if to_be_padded.shape[0] > 0:
-                # retrieve first index of right index that needs padding
-                pad_begin_index = int(to_be_padded[0])
+                # retrieve first index of right index that needs padding (int)
+                pad_begin_index = np.where(right_indexes == int(to_be_padded[0]))[0][0]
 
-                # 4.2 pad mask_left
+                # 4.2 pad mask_left and mask_diagnal and mask_right
+                mask_right[i, pad_begin_index:, :] = 0
                 mask_left[i, :, pad_begin_index:] = 0
-
-                # 4.3 pad mask_diagnal
+                mask_diagnal[i, pad_begin_index:, :] = 0
                 mask_diagnal[i, :, pad_begin_index:] = 0
 
-        mask_right = np.transpose(mask_left, (0, 2, 1))
+        # 5. concatenate all masks
         mask_top = np.concatenate([mask_diagnal, mask_right], axis=-1)
-
         mask_bottom = np.concatenate([mask_left, mask_body], axis=-1)
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
@@ -284,6 +297,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
             x, _ = layer(x, mask)
 
         # 6. Trim copied right context
+        # TODO: does len() work in graph mode?
         x = x[:, len(right_indexes) :, :]
         x = tf.transpose(x, [0, 2, 1])
 

@@ -49,7 +49,7 @@ class TransducerPredictor(nn.Module):
         num_layers: int,
         embed_dim: int,
         dim_model: int,
-        : int,
+        vocab_size: int,
         normalization_mode: Optional[str] = None,
         random_state_sampling: bool = False,
         t_max: int = None,
@@ -96,6 +96,13 @@ class TransducerPredictor(nn.Module):
         # to get state, use .predict() method.
         g, _ = self.predict(y, state=states, add_sos=True)  # (B, U, D)
         g = g.transpose(1, 2)  # (B, D, U)
+
+        # Experiment: Zero out padded parts
+        bs = g.size(0)
+        mask = torch.ones(g.size()).to(device=g.device)
+        for idx in range(bs):
+            mask[idx, :, target_lens[idx] :] = 0
+        g = g * mask
 
         return g, target_lens
 
