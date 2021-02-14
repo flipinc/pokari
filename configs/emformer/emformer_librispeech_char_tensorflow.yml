@@ -96,7 +96,9 @@ preprocessor:
 
 inference:
   _target_: modules.greedy_inference.GreedyInference
-  max_symbols_per_step: 30
+  # TODO: what is the optimal value? for better performance, it is better to be small
+  # check padding in greedy batch decoding for more detail
+  max_symbols_per_step: 10 
 
 stream:
   _target_: modules.stream.EmformerStream
