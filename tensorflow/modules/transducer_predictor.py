@@ -41,7 +41,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         # state maintenance is unnecessary during training forward call
         # to get state, use .predict() method.
         out, _ = self.predict(
-            y, state=states, add_sos=True, training=training
+            y, states=states, add_sos=True, training=training
         )  # (B, U, D)
         out = tf.transpose(out, (0, 2, 1))  # (B, D, U)
 
@@ -50,7 +50,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
     def predict(
         self,
         y: Optional[tf.Tensor] = None,
-        state: Optional[Tuple[tf.Tensor, tf.Tensor]] = None,
+        states: Optional[Tuple[tf.Tensor, tf.Tensor]] = None,
         add_sos: bool = True,
         batch_size: Optional[int] = None,
         training: bool = True,
@@ -110,66 +110,77 @@ class TransducerPredictor(tf.keras.layers.Layer):
             # (B, U) -> (B, U, H)
             y = self.embed(y)
         else:
+            # TODO: since start-of-signal token is 0, which is same as mask_zeroed
+            # index in Embedding, simply passing it through embedding will do
+
             # Y is not provided, assume zero tensor with shape [B, 1, H] is required
             # Emulates output of embedding of pad token.
             if batch_size is None:
-                B = 1 if state is None else state[0].size(1)
+                B = 1 if states is None else states[0].size(1)
             else:
                 B = batch_size
 
             y = tf.zeros((B, 1, self.dim_model), dtype=self.dtype)
 
+        # TODO: same as above TODO
         # Prepend blank "start of sequence" symbol (zero tensor)
+        B = tf.shape(y)[0]
         if add_sos:
-            B = tf.shape(y)[0]
             H = tf.shape(y)[2]
             start = tf.zeros((B, 1, H), dtype=y.dtype)
             y = tf.concat([start, y], axis=1)  # (B, U + 1, H)
 
-        # If in training mode, and random_state_sampling is set,
-        # initialize state to random normal distribution tensor.
-        if state is None:
-            if self.random_state_sampling and training:
-                state = self.initialize_state(y, training)
+        if states is None:
+            states = self.initialize_state(B, training)
 
         # Forward step through RNN
-        out, state = self.rnn(y, state)
+        out, states = self.rnn(y, states)
 
-        return out, state
+        return out, states
 
-    def initialize_state(self, y, training: bool = True):
-        b = tf.shape(y)[0]
-        states = []
+    def initialize_state(self, batch_size: int, training: bool = True):
+        """
 
+        N: number of predictor network layers
+
+        Returns:
+            [N, 2, B, D]
+
+        """
+        b = batch_size
+        states = tf.TensorArray(
+            size=self.num_layers, dtype=self.dtype, clear_after_read=True
+        )
+
+        # If in training mode, and random_state_sampling is set,
+        # initialize state to random normal distribution tensor.
         if self.random_state_sampling and training:
-            for _ in range(self.num_layers):
-                state = (
-                    tf.random.normal(
-                        (b, self.dim_model),
-                        dtype=y.dtype,
-                    ),
-                    tf.random.normal(
-                        (b, self.dim_model),
-                        dtype=y.dtype,
-                    ),
+            for idx in range(self.num_layers):
+                h = tf.random.normal(
+                    (b, self.dim_model),
+                    dtype=self.dtype,
                 )
-                states.append(state)
+                c = tf.random.normal(
+                    (b, self.dim_model),
+                    dtype=self.dtype,
+                )
+                state = tf.stack([h, c], axis=0)
+                states = states.write(idx, state)
 
         else:
-            for _ in range(self.num_layers):
-                state = (
-                    tf.zeros(
-                        (b, self.dim_model),
-                        dtype=y.dtype,
-                    ),
-                    tf.zeros(
-                        (b, self.dim_model),
-                        dtype=y.dtype,
-                    ),
+            for idx in range(self.num_layers):
+                h = tf.zeros(
+                    (b, self.dim_model),
+                    dtype=self.dtype,
                 )
-                states.append(state)
+                c = tf.zeros(
+                    (b, self.dim_model),
+                    dtype=self.dtype,
+                )
+                state = tf.stack([h, c], axis=0)
+                states = states.write(idx, state)
 
-        return states
+        return states.stack()
 
 
 class LSTMLayerNorm(tf.keras.layers.Layer):
@@ -191,7 +202,10 @@ class LSTMLayerNorm(tf.keras.layers.Layer):
 
         Args:
             inputs: [B, U, D]
-            states: [N, B, D]
+            states: [N, 2, B, D]
+
+        Returns:
+            new_states: [N, 2, B, D]
 
         """
         new_states = tf.TensorArray(
@@ -202,7 +216,9 @@ class LSTMLayerNorm(tf.keras.layers.Layer):
         del inputs
 
         for i, layer in enumerate(self.layers):
-            (outputs, h, c) = layer(outputs, states[i])
+            # h and c only accept tuple as an input
+            # h, c -> [B, D]
+            (outputs, h, c) = layer(outputs, (states[i][0], states[i][1]))
             new_states = new_states.write(i, (h, c))
 
         new_states = new_states.stack()

@@ -103,8 +103,4 @@ class TransducerJoint(tf.keras.layers.Layer):
 
         del inp
 
-        # if training on CPU, the following line must be uncommented
-        # ref: https://github.com/HawkAaron/warp-transducer
-        # res = tf.nn.log_softmax(res, axis=-1)
-
         return res

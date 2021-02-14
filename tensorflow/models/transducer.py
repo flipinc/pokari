@@ -3,6 +3,7 @@ from datasets.audio_augment import get_augmentations
 from datasets.audio_to_text import DatasetCreator
 from hydra.utils import instantiate
 from losses.transducer import TransducerLoss
+from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
 
 
@@ -53,14 +54,14 @@ class Transducer(tf.keras.Model):
             vocab_size=len(self.labels),
         )
 
-        # self.inference = instantiate(
-        #     cfg.inference,
-        #     predictor=self.predictor,
-        #     joint=self.joint,
-        #     blank_index=len(self.labels),
-        # )
+        self.inference = instantiate(
+            cfg.inference,
+            predictor=self.predictor,
+            joint=self.joint,
+            blank_index=0,
+        )
 
-        # self.decoder = TransducerDecoder(labels=self.labels, inference=self.inference)
+        self.decoder = TransducerDecoder(labels=self.labels, inference=self.inference)
 
         # self.stream = instantiate(
         #     cfg.stream,

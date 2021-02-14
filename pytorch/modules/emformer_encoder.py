@@ -100,12 +100,17 @@ class EmformerEncoder(nn.Module):
         bs = audio_lens.size(0)
         num_chunks = math.ceil(t_max / self.chunk_length)
 
-        mask_body = torch.zeros(bs, t_max, t_max)
         # TODO: this is allocating more than what is actually required
-        mask_left = torch.zeros(bs, t_max, (num_chunks - 1) * self.right_length)
+        upperbound_right_length = (num_chunks - 1) * self.right_length
+
+        mask_body = torch.zeros(bs, t_max, t_max)
+        mask_left = torch.zeros(bs, t_max, upperbound_right_length)
+        mask_diagnal = torch.zeros(
+            [bs, upperbound_right_length, upperbound_right_length]
+        )
+        mask_right = torch.zeros([bs, upperbound_right_length, t_max])
 
         right_indexes = torch.empty(0).to(dtype=torch.long)
-        total_right_length = 0
         for i in range(num_chunks):
             # 1. mark diagnal and left chunks
             left_offset = (
@@ -132,6 +137,24 @@ class EmformerEncoder(nn.Module):
             else:
                 this_right_length = t_max - end_offset
 
+            mask_left[
+                :,
+                start_offset : start_offset + self.chunk_length,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+            ] = 1
+
+            mask_diagnal[
+                :,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+            ] = 1
+
+            mask_right[
+                :,
+                len(right_indexes) : len(right_indexes) + this_right_length,
+                left_offset:end_offset,
+            ] = 1
+
             right_indexes = torch.cat(
                 [
                     right_indexes,
@@ -139,21 +162,11 @@ class EmformerEncoder(nn.Module):
                 ]
             )
 
-            mask_left[
-                :,
-                start_offset : start_offset + self.chunk_length,
-                i * self.right_length : i * self.right_length + this_right_length,
-            ] = 1
-            total_right_length += this_right_length
-
-        # remove unused right masks
-        mask_left = mask_left[:, :, :total_right_length]
-
-        # 3. create a diagnal mask
+        # 3. remove unused right masks
         right_size = len(right_indexes)
-        mask_diagnal = torch.diag(torch.ones(right_size))
-        mask_diagnal = mask_diagnal.expand(1, right_size, right_size)
-        mask_diagnal = mask_diagnal.repeat(bs, 1, 1)
+        mask_left = mask_left[:, :, :right_size]
+        mask_diagnal = mask_diagnal[:, :right_size, :right_size]
+        mask_right = mask_right[:, :right_size, :]
 
         # 4. mask paddings
         # TODO: there should be a way to parallelize this
@@ -163,22 +176,19 @@ class EmformerEncoder(nn.Module):
             # 4.1 pad mask_body
             mask_body[i, :, max_len:] = 0
             mask_body[i, max_len:, :] = 0
+            mask_right[i, :, max_len:] = 0
 
             to_be_padded = torch.nonzero(right_indexes >= max_len)
             if to_be_padded.size(0) > 0:
-                # BUG: CHECK TENSORFLOW IMPLEMENTATION FOR DETAIl
-
                 pad_begin_index = int(to_be_padded[0])
 
-                # 4.2 pad mask_left
+                mask_right[i, pad_begin_index:, :] = 0
                 mask_left[i, :, pad_begin_index:] = 0
-
-                # 4.3 pad mask_diagnal
+                mask_diagnal[i, pad_begin_index:, :] = 0
                 mask_diagnal[i, :, pad_begin_index:] = 0
 
-        mask_right = mask_left.transpose(1, 2)
+        # 5. concatenate all masks
         mask_top = torch.cat([mask_diagnal, mask_right], dim=-1)
-
         mask_bottom = torch.cat([mask_left, mask_body], dim=-1)
         mask = torch.cat([mask_top, mask_bottom], dim=-2)
         mask = mask.unsqueeze(1)

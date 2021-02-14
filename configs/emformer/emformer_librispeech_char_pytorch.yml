@@ -8,7 +8,7 @@ trainer:
   precision: 16 # Should be set to 16 for O1 and O2 to enable the AMP.
   gradient_clip_val: 1
   weights_summary: full
-  resume_from_checkpoint: null
+  resume_from_checkpoint: ./outputs/lightning_logs/version_14/checkpoints/epoch=0-step=7133.ckpt
   distributed_backend: ddp
   progress_bar_refresh_rate: 20 # for google colab
   default_root_dir: ./outputs # for google colab
