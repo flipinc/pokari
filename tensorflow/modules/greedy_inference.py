@@ -1,9 +1,12 @@
-import collections
 from typing import Optional, Tuple
 
 import tensorflow as tf
 
-Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
+# TODO: instead of while_loop, rely on tensorflow's autograph
+# ref: https://github.com/tensorflow/tensorflow/blob/master/tensorflow
+#           /python/autograph/g3doc/reference/control_flow.md#while-statements
+# ref: https://www.tensorflow.org/guide/function#loops
+# ref: https://github.com/tensorflow/tensorflow/issues/45337
 
 
 class GreedyInference(tf.keras.layers.Layer):
@@ -97,307 +100,183 @@ class GreedyInference(tf.keras.layers.Layer):
                 output sequence.
 
         Returns:
-            packed list containing batch number of sentences (Hypotheses).
+            hypotheses: [B, T]
         """
         # Apply optional preprocessing
         encoded_outs = tf.transpose(encoded_outs, [0, 2, 1])  # (B, T, D)
-        logitlen = encoded_lens
 
-        inseq = encoded_outs  # [B, T, D]
-        # hypotheses, cache_rnn_state = self._perform_greedy_batch(inseq, logitlen)
+        hypotheses, cache_rnn_state = self._greedy_naive_batch_decode(
+            encoded_outs, encoded_lens, cache_rnn_state
+        )
 
-        return self._perform_greedy_batch(inseq, logitlen)
+        return hypotheses, cache_rnn_state
 
-        # hypotheses_list = [torch.tensor(sent, dtype=torch.long) for sent in hypotheses]
-
-        # return hypotheses_list, cache_rnn_state
-
-    def _perform_greedy_batch(
-        self,
-        encoded: tf.Tensor,
-        encoded_length: tf.Tensor,
-        parallel_iterations: int = 10,
-        swap_memory: bool = False,
+    def _greedy_naive_decode(
+        self, encoded_out: tf.Tensor, encoded_len: tf.Tensor, states: tf.Tensor = None
     ):
-        total_batch = tf.shape(encoded)[0]
-        total_time = tf.shape(encoded)[1]
-        batch = tf.constant(0, dtype=tf.int32)
+        """
 
-        decoded = tf.TensorArray(
+        Args:
+            encoded_out: [T, D]
+            encoded_len: [1]
+
+        TODO: this is ridiculously slow compared to pytorch implementation. the main
+        causes are pred_step and joint_step. should do something about this
+
+        """
+        time = tf.constant(0, dtype=tf.int32)
+        max_time = encoded_len
+
+        labels = tf.TensorArray(
             dtype=tf.int32,
-            size=total_batch,
-            dynamic_size=False,
-            clear_after_read=False,
-            element_shape=None,
+            size=0,
+            dynamic_size=True,
+            clear_after_read=True,
         )
+        last_label = tf.fill([1, 1], self._blank_idx)
 
-        def condition(batch, _):
-            return tf.less(batch, total_batch)
-
-        def body(batch, decoded):
-            initial_states = self.predictor.initialize_state(
-                total_batch, training=False
-            )
-            initial_states = tf.gather(initial_states, [0], axis=2)
-
-            hypothesis = self._perform_greedy(
-                encoded=encoded[batch],
-                encoded_length=encoded_length[batch],
-                predicted=tf.constant(self._blank_idx, dtype=tf.int32),
-                states=initial_states,
-                parallel_iterations=parallel_iterations,
-                swap_memory=swap_memory,
-            )
-            prediction = tf.pad(
-                hypothesis.prediction,
-                paddings=[[0, 2 * (total_time - encoded_length[batch])]],
-                mode="CONSTANT",
-                constant_values=self._blank_idx,
-            )
-            decoded = decoded.write(batch, prediction)
-            return batch + 1, decoded
-
-        batch, decoded = tf.while_loop(
-            condition,
-            body,
-            loop_vars=[batch, decoded],
-            parallel_iterations=parallel_iterations,
-            swap_memory=True,
-        )
-
-        return decoded
-
-    def _perform_greedy(
-        self,
-        encoded: tf.Tensor,
-        encoded_length: tf.Tensor,
-        predicted: tf.Tensor,
-        states: tf.Tensor,
-        parallel_iterations: int = 10,
-        swap_memory: bool = False,
-    ):
-        with tf.name_scope(f"{self.name}_greedy"):
-            time = tf.constant(0, dtype=tf.int32)
-            total = encoded_length
-
-            hypothesis = Hypothesis(
-                index=predicted,
-                prediction=tf.TensorArray(
-                    dtype=tf.int32,
-                    size=total,
-                    dynamic_size=False,
-                    clear_after_read=False,
-                    element_shape=tf.TensorShape([]),
-                ),
-                states=states,
+        def blank_loop_cond(
+            _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
+        ):
+            anchor = tf.constant(0, dtype=tf.int32)
+            return tf.equal(is_blank, anchor) and tf.less(
+                symbols_added, self.max_symbols
             )
 
-            def condition(_time, _total, _encoded, _hypothesis):
-                return tf.less(_time, _total)
-
-            def body(_time, _total, _encoded, _hypothesis):
-                if _time == 0:
-                    decoded_out_t, _states = self._pred_step(
-                        None, _hypothesis.states, batch_size=1
-                    )
-                else:
-                    # Perform batch step prediction of decoder, getting new states and
-                    # scores ("g")
-                    decoded_out_t, _states = self._pred_step(
-                        None, _hypothesis.states, batch_size=1
-                    )
-
-                print(_time)
-
-                # Batched joint step - Output = [B, V + 1]
-                joint_out = self._joint_step(_encoded, decoded_out_t)
-                ytu = joint_out[0, 0, 0, :]
-
-                _predict = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # => argmax []
-
-                _equal = tf.equal(_predict, self._blank_idx)
-                _index = tf.where(_equal, _hypothesis.index, _predict)
-                _states = tf.where(_equal, _hypothesis.states, _states)
-
-                _prediction = _hypothesis.prediction.write(_time, _predict)
-                _hypothesis = Hypothesis(
-                    index=_index, prediction=_prediction, states=_states
+        def blank_loop_body(
+            _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
+        ):
+            if _time == 0 and symbols_added == 0:
+                decoded_out_t, next_states = self._pred_step(
+                    None, _states, batch_size=1
+                )
+            else:
+                # Perform batch step prediction of decoder, getting new states and
+                # scores ("g")
+                decoded_out_t, next_states = self._pred_step(
+                    _last_label, _states, batch_size=1
                 )
 
-                return _time + 1, _total, _encoded, _hypothesis
+            # Batched joint step - Output = [B, V + 1]
+            joint_out = self._joint_step(encoded_out_t, decoded_out_t)
+            logp = joint_out[:, 0, 0, :]  # [1, V + 1]
 
-            _, _, _, hypothesis = tf.while_loop(
-                condition,
-                body,
-                loop_vars=[time, total, encoded, hypothesis],
-                parallel_iterations=parallel_iterations,
-                swap_memory=swap_memory,
+            symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [1]
+
+            # TODO: should this be moved inside false_fn as recording blank_idx is
+            # unnecessary
+            _labels = _labels.write(_labels.size(), symbol_idx)
+
+            def true_fn():
+                is_blank = tf.constant(1, tf.int32)
+                return (
+                    _time,
+                    is_blank,
+                    symbols_added,
+                    _last_label,
+                    _labels,
+                    encoded_out_t,
+                    _states,
+                )
+
+            def false_fn():
+                _states = next_states
+                _last_label = tf.expand_dims(symbol_idx, axis=0)
+                return (
+                    _time,
+                    is_blank,
+                    symbols_added + 1,
+                    _last_label,
+                    _labels,
+                    encoded_out_t,
+                    _states,
+                )
+
+            return tf.cond(tf.equal(symbol_idx, self._blank_idx), true_fn, false_fn)
+
+        def time_loop_cond(_time, _last_label, _labels, _states):
+            return tf.less(_time, max_time)
+
+        def time_loop_body(_time, _last_label, _labels, _states):
+            encoded_out_t = tf.gather(encoded_out, tf.reshape(_time, shape=[1]))
+            is_blank = tf.constant(0, tf.int32)
+            symbols_added = tf.constant(0, tf.int32)
+
+            _, _, _, _last_label, _labels, _, _states = tf.while_loop(
+                blank_loop_cond,
+                blank_loop_body,
+                loop_vars=[
+                    _time,
+                    is_blank,
+                    symbols_added,
+                    _last_label,
+                    _labels,
+                    encoded_out_t,
+                    _states,
+                ],
             )
 
-            return Hypothesis(
-                index=hypothesis.index,
-                prediction=hypothesis.prediction.stack(),
-                states=hypothesis.states,
+            return _time + 1, _last_label, _labels, _states
+
+        _, _, labels, states = tf.while_loop(
+            time_loop_cond,
+            time_loop_body,
+            loop_vars=[time, last_label, labels, states],
+        )
+
+        # [B, T, 1] -> [B, T]
+        labels = tf.squeeze(labels.stack())
+
+        return labels, states
+
+    def _greedy_naive_batch_decode(
+        self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
+    ):
+        """Naive implementation of greedy batch decode, which loops over batch size.
+
+        N_p: number of layers in predictor
+
+        Args:
+            encoded_out: [B, T, D]
+            encoded_lens: [B]
+            states: List[([B, D], [B, D])] * N_p
+
+        """
+        batch_idx = tf.constant(0, dtype=tf.int32)
+        batch_size = tf.shape(encoded_outs)[0]
+
+        if states is None:
+            states = self.predictor.initialize_state(batch_size, training=False)
+
+        def batch_loop_cond(_batch_idx, _labels, _states):
+            return tf.less(_batch_idx, batch_size)
+
+        labels = tf.TensorArray(size=batch_size, dtype=tf.int32)
+        new_states = tf.TensorArray(size=batch_size, dtype=encoded_outs.dtype)
+
+        def batch_loop_body(_batch_idx, _labels, _new_states):
+            _labels_one, _states_one = self._greedy_naive_decode(
+                encoded_outs[_batch_idx],
+                encoded_lens[_batch_idx],
+                states=tf.gather(states, [batch_idx], axis=2),
             )
 
-    # def _greedy_naive_decode(
-    #     self, encoded_out: tf.Tensor, encoded_len: tf.Tensor, states: tf.Tensor = None
-    # ):
-    #     """
+            _labels = _labels.write(_batch_idx, _labels_one)
+            _new_states = _new_states.write(_batch_idx, _states_one)
 
-    #     Args:
-    #         encoded_out: [T, D]
-    #         encoded_len: [1]
+            return _batch_idx + 1, _labels, _new_states
 
-    #     """
-    #     time = tf.constant(0, dtype=tf.int32)
-    #     max_time = encoded_len
+        _, _labels, new_states = tf.while_loop(
+            batch_loop_cond,
+            batch_loop_body,
+            loop_vars=[batch_idx, labels, new_states],
+        )
 
-    #     labels = tf.TensorArray(
-    #         dtype=tf.int32,
-    #         size=0,
-    #         dynamic_size=True,
-    #         clear_after_read=True,
-    #     )
-    #     last_label = tf.fill([1, 1], self._blank_idx)
+        return labels.stack(), new_states.stack()
 
-    #     def blank_loop_cond(
-    #         _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
-    #     ):
-    #         anchor = tf.constant(0, dtype=tf.int32)
-    #         return tf.equal(is_blank, anchor) and tf.less(
-    #             symbols_added, self.max_symbols
-    #         )
+    def _greedy_batch_decode(encoded_out: tf.Tensor, encoded_lens: tf.Tensor):
+        """Greedy batch decoding in parallel"""
 
-    #     def blank_loop_body(
-    #         _time, is_blank, symbols_added, _last_label, _labels, encoded_out_t, _states
-    #     ):
-    #         if _time == 0 and symbols_added == 0:
-    #             decoded_out_t, next_states = self._pred_step(
-    #                 None, _states, batch_size=1
-    #             )
-    #         else:
-    #             # Perform batch step prediction of decoder, getting new states and
-    #             # scores ("g")
-    #             decoded_out_t, next_states = self._pred_step(
-    #                 _last_label, _states, batch_size=1
-    #             )
+        # TODO: use greedy naive decode as base
 
-    #         # Batched joint step - Output = [B, V + 1]
-    #         joint_out = self._joint_step(encoded_out_t, decoded_out_t)
-    #         logp = joint_out[:, 0, 0, :]
-
-    #         symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)
-    #         _labels = _labels.write(_time, symbol_idx)
-
-    #         def true_fn():
-    #             is_blank = tf.constant(1, tf.int32)
-    #             return (
-    #                 _time,
-    #                 is_blank,
-    #                 symbols_added,
-    #                 _last_label,
-    #                 _labels,
-    #                 encoded_out_t,
-    #                 _states,
-    #             )
-
-    #         def false_fn():
-    #             _states = next_states
-    #             _last_label = tf.expand_dims(symbol_idx, axis=-1)
-    #             return (
-    #                 _time,
-    #                 is_blank,
-    #                 symbols_added + 1,
-    #                 _last_label,
-    #                 _labels,
-    #                 encoded_out_t,
-    #                 _states,
-    #             )
-
-    #         return tf.cond(tf.equal(symbol_idx, self._blank_idx), true_fn, false_fn)
-
-    #     def time_loop_cond(_time, _last_label, _labels, _states):
-    #         return tf.less(_time, max_time)
-
-    #     def time_loop_body(_time, _last_label, _labels, _states):
-    #         encoded_out_t = tf.gather(encoded_out, tf.reshape(_time, shape=[1]))
-    #         is_blank = tf.constant(0, tf.int32)
-    #         symbols_added = tf.constant(0, tf.int32)
-
-    #         _, _, _, _last_label, _labels, _, _states = tf.while_loop(
-    #             blank_loop_cond,
-    #             blank_loop_body,
-    #             loop_vars=[
-    #                 _time,
-    #                 is_blank,
-    #                 symbols_added,
-    #                 _last_label,
-    #                 _labels,
-    #                 encoded_out_t,
-    #                 _states,
-    #             ],
-    #         )
-
-    #         return _time + 1, _last_label, _labels, _states
-
-    #     _, _, labels, states = tf.while_loop(
-    #         time_loop_cond,
-    #         time_loop_body,
-    #         loop_vars=[time, last_label, labels, states],
-    #         parallel_iterations=10,
-    #         swap_memory=True,
-    #     )
-
-    #     return labels.stack(), states
-
-    # def _greedy_naive_batch_decode(
-    #     self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
-    # ):
-    #     """Naive implementation of greedy batch decode, which loops over batch size.
-
-    #     N_p: number of layers in predictor
-
-    #     Args:
-    #         encoded_out: [B, T, D]
-    #         encoded_lens: [B]
-    #         states: List[([B, D], [B, D])] * N_p
-
-    #     """
-    #     batch_idx = tf.constant(0, dtype=tf.int32)
-    #     batch_size = tf.shape(encoded_outs)[0]
-
-    #     if states is None:
-    #         states = self.predictor.initialize_state(batch_size, training=False)
-
-    #     def batch_loop_cond(_batch_idx, _labels, _states):
-    #         return tf.less(_batch_idx, batch_size)
-
-    #     labels = tf.TensorArray(size=batch_size, dtype=tf.int32)
-    #     new_states = tf.TensorArray(size=batch_size, dtype=encoded_outs.dtype)
-
-    #     def batch_loop_body(_batch_idx, _labels, _new_states):
-    #         _labels_one, _states_one = self._greedy_naive_decode(
-    #             encoded_outs[_batch_idx],
-    #             encoded_lens[_batch_idx],
-    #             states=tf.gather(states, [batch_idx], axis=2),
-    #         )
-
-    #         _labels = _labels.write(_batch_idx, _labels_one)
-    #         _new_states = _new_states.write(_batch_idx, _states_one)
-
-    #         return _batch_idx + 1, _labels, _new_states
-
-    #     _, _labels, new_states = tf.while_loop(
-    #         batch_loop_cond,
-    #         batch_loop_body,
-    #         loop_vars=[batch_idx, labels, new_states],
-    #         parallel_iterations=10,
-    #         swap_memory=True,
-    #     )
-
-    #     return labels.stack(), new_states.stack()
-
-    # def _greedy_batch_decode(encoded_out: tf.Tensor, encoded_lens: tf.Tensor):
-    #     """Greedy batch decoding in parallel"""
-    #     pass
+        pass

@@ -20,8 +20,8 @@ if __name__ == "__main__":
         **cfg_joint, vocab_size=29, encoder_hidden=512, predictor_hidden=320
     )
 
-    encoded_outs = torch.randn(4, 512, 320)
-    encoded_lens = torch.Tensor([320, 320, 320, 320])
+    encoded_outs = torch.randn(4, 512, 60)
+    encoded_lens = torch.Tensor([60, 60, 60, 60])
 
     inference = GreedyInference(
         predictor, joint, blank_index=0, max_symbols_per_step=30

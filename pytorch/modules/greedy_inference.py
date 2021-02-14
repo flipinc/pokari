@@ -174,7 +174,6 @@ class GreedyInference(nn.Module):
         max_out_len = int(out_len.max())
 
         for time_idx in range(max_out_len):
-            print(time_idx)
             f = x.narrow(dim=1, start=time_idx, length=1)  # [B, 1, D]
 
             # Prepare t timestamp batch variables
