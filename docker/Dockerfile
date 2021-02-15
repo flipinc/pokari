@@ -1,5 +1,4 @@
-# as of 2021/2/13, `latest` has some bugs related to RTX 3090 configuration
-# FROM tensorflow/tensorflow:nightly-gpu
+# as of 2021/2/13, tensorflow/tensorflow:nightly-gpu or :latest-gpu has ome bugs related to RTX 3090 configuration
 FROM nvcr.io/nvidia/tensorflow:20.12-tf2-py3
 
 # install sndfile library

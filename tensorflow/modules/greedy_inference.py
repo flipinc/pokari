@@ -2,12 +2,6 @@ from typing import Optional, Tuple
 
 import tensorflow as tf
 
-# TODO: instead of while_loop, rely on tensorflow's autograph
-# ref: https://github.com/tensorflow/tensorflow/blob/master/tensorflow
-#           /python/autograph/g3doc/reference/control_flow.md#while-statements
-# ref: https://www.tensorflow.org/guide/function#loops
-# ref: https://github.com/tensorflow/tensorflow/issues/45337
-
 
 class GreedyInference(tf.keras.layers.Layer):
     """A greedy transducer decoder.
@@ -105,7 +99,7 @@ class GreedyInference(tf.keras.layers.Layer):
         # Apply optional preprocessing
         encoded_outs = tf.transpose(encoded_outs, [0, 2, 1])  # (B, T, D)
 
-        hypotheses, cache_rnn_state = self._greedy_naive_batch_decode(
+        hypotheses, cache_rnn_state = self._greedy_batch_decode(
             encoded_outs, encoded_lens, cache_rnn_state
         )
 
@@ -114,7 +108,13 @@ class GreedyInference(tf.keras.layers.Layer):
     def _greedy_naive_decode(
         self, encoded_out: tf.Tensor, encoded_len: tf.Tensor, states: tf.Tensor = None
     ):
-        """
+        """Naive implementation of greedy decoding. Only Accepts Batch_size = 1
+
+        For better readability, we rely on Autograph as much as possible. See Github's
+        offical documentation for more info on Autograph.
+
+        https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/autograph
+        /g3doc/reference
 
         Args:
             encoded_out: [T, D]
@@ -146,17 +146,16 @@ class GreedyInference(tf.keras.layers.Layer):
                         None, states, batch_size=1
                     )
                 else:
-                    # Perform batch step prediction of decoder, getting new states and
-                    # scores ("g")
                     decoded_out_t, next_states = self._pred_step(
                         last_label, states, batch_size=1
                     )
 
-                # Batched joint step - Output = [B, V + 1]
+                # [1, 1, 1, V + 1]
                 joint_out = self._joint_step(
                     tf.expand_dims(encoded_out_t, axis=0), decoded_out_t
                 )
-                logp = joint_out[:, 0, 0, :]  # [1, V + 1]
+                # [1, V + 1]
+                logp = joint_out[:, 0, 0, :]
 
                 symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [1]
 
@@ -218,9 +217,79 @@ class GreedyInference(tf.keras.layers.Layer):
 
         return labels.stack(), new_states.stack()
 
-    def _greedy_batch_decode(encoded_out: tf.Tensor, encoded_lens: tf.Tensor):
+    def _greedy_batch_decode(
+        self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
+    ):
         """Greedy batch decoding in parallel"""
+        bs = tf.shape(encoded_outs)[0]
+        t_max = tf.shape(encoded_outs)[1]
+        labels = tf.TensorArray(
+            dtype=tf.int32,
+            size=0,
+            dynamic_size=True,
+            clear_after_read=True,
+        )
+        # for idx in tf.range(bs):
+        #     batch_labels.append(
+        #         tf.TensorArray(
+        #             dtype=tf.int32,
+        #             size=0,
+        #             dynamic_size=True,
+        #             clear_after_read=True,
+        #         )
+        #     )
 
-        # TODO: use greedy naive decode as base
+        last_label = tf.fill([bs, 1], self._blank_idx)
 
-        pass
+        blank_mask = tf.fill([bs], 0)
+
+        anchor = tf.constant(0, dtype=tf.int32)
+        for t in tf.range(t_max):
+            is_blank = tf.constant(0, tf.int32)
+            symbols_added = tf.constant(0, tf.int32)
+
+            # mask buffers
+            blank_mask = tf.fill(tf.shape(blank_mask), 0)
+
+            # Forcibly mask with "blank" tokens, for all sample where
+            # current time step T > seq_len
+            blank_mask = tf.cast(t >= encoded_lens, tf.int32)
+
+            # get encoded_outs at timestep t -> [B, 1, D]
+            encoded_out_t = tf.gather(encoded_outs, [t], axis=1)
+
+            while tf.equal(is_blank, anchor) and tf.less(
+                symbols_added, self.max_symbols
+            ):
+                if tf.equal(t, 0) and tf.equal(symbols_added, 0):
+                    decoded_out_t, next_states = self._pred_step(
+                        None, states, batch_size=1
+                    )
+                else:
+                    decoded_out_t, next_states = self._pred_step(
+                        last_label, states, batch_size=1
+                    )
+
+                # [B, 1, 1, V + 1]
+                joint_out = self._joint_step(
+                    tf.expand_dims(encoded_out_t, axis=0), decoded_out_t
+                )
+                # [B, V + 1]
+                logp = joint_out[:, 0, 0, :]
+
+                symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [B]
+
+                symbol_is_blank = tf.cast(symbol_idx == self._blank_idx, tf.int32)
+                blank_mask = tf.bitwise.bitwise_or(blank_mask, symbol_is_blank)
+
+                labels = labels.write(labels.size(), symbol_idx)
+
+                if tf.reduce_all(tf.cast(blank_mask, tf.bool)):
+                    is_blank = tf.constant(1, tf.int32)
+                else:
+                    symbols_added += 1
+
+        # [B, T, 1] -> [B, T]
+        labels = tf.squeeze(labels.stack())
+
+        return labels, states
