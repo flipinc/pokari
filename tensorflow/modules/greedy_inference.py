@@ -241,7 +241,12 @@ class GreedyInference(tf.keras.layers.Layer):
 
         last_label = tf.fill([bs, 1], self._blank_idx)
 
+        blank_indices = tf.fill([bs], 0)
         blank_mask = tf.fill([bs], 0)
+        one = tf.constant(1, tf.int32)
+        states = (
+            states if states is not None else self.predictor.initialize_state(bs, False)
+        )
 
         anchor = tf.constant(0, dtype=tf.int32)
         for t in tf.range(t_max):
@@ -263,30 +268,92 @@ class GreedyInference(tf.keras.layers.Layer):
             ):
                 if tf.equal(t, 0) and tf.equal(symbols_added, 0):
                     decoded_out_t, next_states = self._pred_step(
-                        None, states, batch_size=1
+                        None, states, batch_size=bs
                     )
                 else:
                     decoded_out_t, next_states = self._pred_step(
-                        last_label, states, batch_size=1
+                        last_label, states, batch_size=bs
                     )
 
                 # [B, 1, 1, V + 1]
-                joint_out = self._joint_step(
-                    tf.expand_dims(encoded_out_t, axis=0), decoded_out_t
-                )
+                joint_out = self._joint_step(encoded_out_t, decoded_out_t)
                 # [B, V + 1]
                 logp = joint_out[:, 0, 0, :]
 
-                symbol_idx = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [B]
+                symbols = tf.argmax(logp, axis=-1, output_type=tf.int32)  # [B]
 
-                symbol_is_blank = tf.cast(symbol_idx == self._blank_idx, tf.int32)
-                blank_mask = tf.bitwise.bitwise_or(blank_mask, symbol_is_blank)
+                symbol_is_blank = tf.cast(symbols == self._blank_idx, tf.int32)
+                # bitwise_or return [1, B] so get rid of first dim -> [B]
+                blank_mask = tf.squeeze(
+                    tf.bitwise.bitwise_or(blank_mask, symbol_is_blank)
+                )
 
-                labels = labels.write(labels.size(), symbol_idx)
+                labels = labels.write(labels.size(), symbols)
 
                 if tf.reduce_all(tf.cast(blank_mask, tf.bool)):
                     is_blank = tf.constant(1, tf.int32)
                 else:
+                    # Collect batch indices where blanks occurred now/past
+                    # if states is not None:
+                    #     blank_indices = tf.cast(tf.equal(blank_mask, one), tf.int32)
+
+                    # Recover prior state for all samples which predicted blank now/past
+                    # if states is not None:
+                    # [N, 2, B, D]
+                    # next_states[:, :, blank_indices, :] = states[
+                    #     :, :, blank_indices, :
+                    # ]
+                    # temp_states = tf.TensorArray(
+                    #     next_states.dtype, size=bs, clear_after_read=True
+                    # )
+                    # for idx in tf.range(bs):
+                    #     state = tf.where(
+                    #         tf.cast(blank_indices[idx], tf.bool),
+                    #         states[:, :, idx, :],
+                    #         next_states[:, :, idx, :],
+                    #     )
+                    #     temp_states = temp_states.write(idx, state)
+                    # next_states = temp_states.stack()
+                    # # [B, N, 2, D] -> [N, 2, B, D]
+                    # next_states = tf.transpose(next_states, (1, 2, 0, 3))
+
+                    # Collect batch indices where blanks occurred now/past
+                    blank_indices = tf.cast(tf.equal(blank_mask, one), tf.int32)
+
+                    # Recover prior state for all samples which predicted blank now/past
+                    temp_states = tf.TensorArray(
+                        next_states.dtype, size=bs, clear_after_read=True
+                    )
+                    for idx in tf.range(bs):
+                        state = tf.where(
+                            tf.cast(blank_indices[idx], tf.bool),
+                            states[:, :, idx, :],
+                            next_states[:, :, idx, :],
+                        )
+                        temp_states = temp_states.write(idx, state)
+                    next_states = temp_states.stack()
+                    # [B, N, 2, D] -> [N, 2, B, D]
+                    next_states = tf.transpose(next_states, (1, 2, 0, 3))
+
+                    # Recover prior predicted label for all samples which predicted
+                    # blank now/past
+                    # symbols[blank_indices] = last_label[blank_indices, 0]
+                    new_symbols = tf.TensorArray(
+                        symbols.dtype, size=bs, clear_after_read=True
+                    )
+                    for idx in tf.range(bs):
+                        symbol = tf.where(
+                            tf.cast(blank_indices[idx], tf.bool),
+                            last_label[idx, 0],
+                            symbols[idx],
+                        )
+                        new_symbols = new_symbols.write(idx, symbol)
+                    new_symbols = new_symbols.stack()
+
+                    # Update new label and hidden state for next iteration
+                    last_label = tf.expand_dims(new_symbols, axis=-1)
+                    states = next_states
+
                     symbols_added += 1
 
         # [B, T, 1] -> [B, T]
