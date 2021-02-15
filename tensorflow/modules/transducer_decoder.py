@@ -12,7 +12,7 @@ class TransducerDecoder(tf.keras.layers.Layer):
         self.labels = [""] + labels
         self.inference = inference
 
-    @tf.function
+    # @tf.function
     def __call__(
         self,
         encoder_output: tf.Tensor,
