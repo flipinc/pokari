@@ -2,15 +2,20 @@ trainer:
   epochs: 100
   max_queue_size: 10
   use_multiprocessing: true
-  workers: 4
-  run_eagerly: false
+  workers: 8
+  run_eagerly: true
   model_checkpoint:
     filepath: checkpoints
     save_best_only: true
   tensorboard:
     log_dir: outputs
-  precision:
-    name: mixed_float16
+  precision: mixed_float16
+  log_every_n_steps: 10
+  # gradient_clip_val: 1
+  # variational_noise:
+  #   mean: 0
+  #   std: 0.075
+  #   start_step: -1
 
 labels:
   [
@@ -150,11 +155,3 @@ optimizer:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_ratio: 0.05
     warmup_learning_rate: 1e-6
-
-postprocessor:
-  log_every_n_steps: 10
-  gradient_clip_val: 1
-  variational_noise:
-    mean: 0
-    std: 0.075
-    start_step: -1

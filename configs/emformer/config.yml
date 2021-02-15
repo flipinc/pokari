@@ -1,0 +1,98 @@
+speech_config:
+  sample_rate: 16000
+  frame_ms: 25
+  stride_ms: 10
+  num_feature_bins: 80
+  feature_type: log_mel_spectrogram
+  preemphasis: 0.97
+  normalize_signal: true
+  normalize_feature: true
+  normalize_per_feature: false
+
+decoder_config:
+  vocabulary: null
+  target_vocab_size: 1024
+  max_subword_length: 4
+  blank_at_zero: true
+  beam_width: 5
+  norm_score: true
+
+model_config:
+  name: streaming_transducer
+  # Note(keisuke): use default value as yaml does not support dict with number as an index
+  # encoder_reductions:
+  #   - 3 
+  #   - 2
+  encoder_dmodel: 320
+  encoder_rnn_type: lstm
+  encoder_rnn_units: 1024
+  encoder_nlayers: 8
+  encoder_layer_norm: true
+  prediction_embed_dim: 320
+  prediction_embed_dropout: 0.0
+  prediction_num_rnns: 2
+  prediction_rnn_units: 1024
+  prediction_rnn_type: lstm
+  prediction_projection_units: 320
+  prediction_layer_norm: true
+  joint_dim: 320
+  joint_activation: tanh
+
+learning_config:
+  train_dataset_config:
+    stage: train
+    use_tf: true
+    augmentation_config:
+      after:
+        time_masking:
+          num_masks: 10
+          mask_factor: 100
+          p_upperbound: 0.05
+        freq_masking:
+          num_masks: 1
+          mask_factor: 27
+    data_paths:
+      - /workspace/datasets/tensorflow_asr.tsv
+    shuffle: true
+    cache: true
+    buffer_size: 100
+    drop_remainder: true
+
+  eval_dataset_config:
+    stage: val
+    use_tf: true
+    data_paths:
+      - /workspace/datasets/tensorflow_asr_val.tsv
+    shuffle: false
+    cache: true
+    buffer_size: 100
+    drop_remainder: true
+
+  optimizer_config:
+    class_name: adam
+    config:
+      learning_rate: 0.0001
+
+  running_config:
+    batch_size: 2
+    num_epochs: 20
+    checkpoint:
+      filepath: outputs/tensorflow_asr/checkpoints/{epoch:02d}.h5
+      save_best_only: true
+      save_weights_only: false
+      save_freq: epoch
+    states_dir: outputs/tensorflow_asr/states
+    tensorboard:
+      log_dir: outputs/tensorflow_asr
+      histogram_freq: 1
+      write_graph: true
+      write_images: true
+      update_freq: epoch
+      profile_batch: 2
+
+tfrecords: false # Whether to use tfrecords
+devices: [0] # Devices' ids to apply distributed training
+mxp: true # Enable mixed precision
+subwords: /workspace/datasets/subwords.subwords # Path to file that stores generated subwords
+subwords_corpus: # Transcript files for generating subwords
+  - /workspace/datasets/tensorflow_asr.tsv

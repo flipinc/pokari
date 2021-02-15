@@ -3,6 +3,7 @@ from datasets.audio_augment import get_augmentations
 from datasets.audio_to_text import DatasetCreator
 from hydra.utils import instantiate
 from losses.transducer import TransducerLoss
+from metrics.error_rate import ErrorRate
 from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
 
@@ -11,7 +12,7 @@ class Transducer(tf.keras.Model):
     def __init__(self, cfg: DictConfig):
         super().__init__()
 
-        self.labels = cfg.labels
+        self.labels = OmegaConf.to_container(cfg.labels)
 
         self.train_dl, self.num_train_samples = self.setup_dataloader_from_config(
             cfg.train_ds
@@ -70,13 +71,8 @@ class Transducer(tf.keras.Model):
         #     decoder=self.decoder,
         # )
 
-        # self.wer = TransducerWER(
-        #     decoder=self.decoder,
-        #     batch_dim_index=0,
-        #     use_cer=False,
-        #     log_prediction=True,
-        #     dist_sync_on_step=True,
-        # )
+        self.wer = ErrorRate(kind="wer")
+        self.cer = ErrorRate(kind="cer")
 
         loss = TransducerLoss()
 
@@ -109,19 +105,14 @@ class Transducer(tf.keras.Model):
         else:
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
-        self.mixed_precision_enabled = (
-            "precision" in cfg and cfg["precision"] is not None
-        )
+        self.trainer_cfg = OmegaConf.to_container(cfg.trainer)
 
-        if self.mixed_precision_enabled:
+        if "precision" in self.trainer_cfg:
             optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
 
         super(Transducer, self).compile(
             optimizer=optimizer, loss=loss, run_eagerly=cfg.trainer.run_eagerly
         )
-
-        self.trainer_cfg = OmegaConf.to_container(cfg.trainer)
-        self.postprocessor_cfg = OmegaConf.to_container(cfg.postprocessor)
 
     def setup_dataloader_from_config(self, cfg: DictConfig):
         augmentor = get_augmentations(cfg["augmentor"]) if "augmentor" in cfg else None
@@ -224,16 +215,40 @@ class Transducer(tf.keras.Model):
                 joint_outputs, (encoded_lens, transcripts, transcript_lens)
             )
 
-            if self.mixed_precision_enabled:
+            if "precision" in self.trainer_cfg:
                 loss = self.optimizer.get_scaled_loss(loss)
 
         # scaling and unscaling for amp
         gradients = tape.gradient(loss, self.trainable_weights)
-        if self.mixed_precision_enabled:
+        if "precision" in self.trainer_cfg:
             gradients = self.optimizer.get_unscaled_gradients(gradients)
 
-        # TODO: clip gradient
-        # TODO: vairational noise
+        if "gradient_clip_val" in self.trainer_cfg:
+            high = self.trainer_cfg["gradient_clip_val"]
+            low = high * -1
+            gradients = [tf.clip_by_value(grad, low, high) for grad in gradients]
+
+        if "variational_noise" in self.trainer_cfg:
+            mean = self.trainer_cfg["variational_noise"]["mean"]
+            std = self.trainer_cfg["variational_noise"]["std"]
+            start_step = (
+                # TODO: get warmup_steps from lr_scheduler
+                self.warmup_steps
+                if self.trainer_cfg["variational_noise"]["start_step"] == -1
+                else self.trainer_cfg["variational_noise"]["start_step"]
+            )
+
+            # TODO: how to get global_step in tensorflow?
+            if std > 0 and self.global_step >= start_step:
+                gradients = [
+                    grad
+                    + tf.random_normal(
+                        tf.shape(grad),
+                        mean=mean,
+                        std=std,
+                    )
+                    for grad in gradients
+                ]
 
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 

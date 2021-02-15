@@ -54,12 +54,10 @@ if __name__ == "__main__":
         **cfg_joint, vocab_size=len(labels), encoder_hidden=512, predictor_hidden=320
     )
 
-    encoded_outs = tf.random.normal((2, 512, 10))
-    encoded_lens = tf.constant([10, 10])
+    encoded_outs = tf.random.normal((3, 512, 40))
+    encoded_lens = tf.constant([40, 40, 40])
 
-    inference = GreedyInference(
-        predictor, joint, blank_index=0, max_symbols_per_step=10
-    )
+    inference = GreedyInference(predictor, joint, blank_index=0, max_symbols_per_step=5)
 
     # inference(encoded_outs, encoded_lens)
 
