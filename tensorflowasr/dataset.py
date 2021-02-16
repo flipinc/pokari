@@ -60,6 +60,8 @@ class Dataset:
         )
         self.total_steps = None  # for better training visualization
 
+        self.num_print_sample_data = 2
+
     def create(self, batch_size: int):
         self.read_entries()
         if not self.total_steps or self.total_steps == 0:
@@ -106,33 +108,33 @@ class Dataset:
         if self.shuffle:
             dataset = dataset.shuffle(self.buffer_size, reshuffle_each_iteration=True)
 
-        # PADDED BATCH the dataset
+        if self.num_print_sample_data:
+            for d in dataset.take(self.num_print_sample_data):
+                print(d)
+
         dataset = dataset.padded_batch(
             batch_size=batch_size,
             padded_shapes=(
                 {
-                    "path": tf.TensorShape([]),
-                    "input": tf.TensorShape(self.speech_featurizer.shape),
-                    "input_length": tf.TensorShape([]),
-                    "prediction": tf.TensorShape([None]),
-                    "prediction_length": tf.TensorShape([]),
+                    "audio_signals": tf.TensorShape([None]),
+                    "audio_lens": tf.TensorShape([]),
+                    "targets": tf.TensorShape([None]),
+                    "target_lens": tf.TensorShape([]),
                 },
-                {"label": tf.TensorShape([None]), "label_length": tf.TensorShape([])},
+                {"labels": tf.TensorShape([None]), "label_lens": tf.TensorShape([])},
             ),
             padding_values=(
                 {
-                    "path": "",
-                    "input": 0.0,
-                    "input_length": 0,
-                    "prediction": self.text_featurizer.blank,
-                    "prediction_length": 0,
+                    "audio_signals": 0.0,
+                    "audio_lens": 0,
+                    "targets": self.text_featurizer.blank,
+                    "target_lens": 0,
                 },
-                {"label": self.text_featurizer.blank, "label_length": 0},
+                {"labels": self.text_featurizer.blank, "label_lens": 0},
             ),
             drop_remainder=self.drop_remainder,
         )
 
-        # PREFETCH to improve speed of input length
         dataset = dataset.prefetch(AUTOTUNE)
         self.total_steps = get_num_batches(
             self.total_steps, batch_size, drop_remainders=self.drop_remainder
@@ -141,33 +143,30 @@ class Dataset:
 
     @tf.function
     def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
-        """
-        Returns:
-            path, features, input_lengths, labels, label_lengths, pred_inp
-        """
         with tf.device("/CPU:0"):
-            signal = tf_read_raw_audio(audio, self.speech_featurizer.sample_rate)
+            audio_signal = tf_read_raw_audio(audio, self.speech_featurizer.sample_rate)
+            # audio_signal = tf.convert_to_tensor(audio_signal, tf.float32)
 
-            signal = self.augmentations.before.augment(signal)
+            audio_len = tf.cast(tf.shape(audio_signal)[0], tf.int32)
 
-            features = self.speech_featurizer.tf_extract(signal)
+            # signal = self.augmentations.before.augment(signal)
 
-            features = self.augmentations.after.augment(features)
+            # features = self.speech_featurizer.tf_extract(signal)
+
+            # features = self.augmentations.after.augment(features)
 
             label = tf.strings.to_number(tf.strings.split(indices), out_type=tf.int32)
-            label_length = tf.cast(tf.shape(label)[0], tf.int32)
-            prediction = self.text_featurizer.prepand_blank(label)
-            prediction_length = tf.cast(tf.shape(prediction)[0], tf.int32)
-            features = tf.convert_to_tensor(features, tf.float32)
-            input_length = tf.cast(tf.shape(features)[0], tf.int32)
+            label_len = tf.cast(tf.shape(label)[0], tf.int32)
+
+            target = self.text_featurizer.prepand_blank(label)
+            target_len = tf.cast(tf.shape(target)[0], tf.int32)
 
         return (
             {
-                "path": path,
-                "input": features,
-                "input_length": input_length,
-                "prediction": prediction,
-                "prediction_length": prediction_length,
+                "audio_signals": audio_signal,
+                "audio_lens": audio_len,
+                "targets": target,
+                "target_lens": target_len,
             },
-            {"label": label, "label_length": label_length},
+            {"labels": label, "label_lens": label_len},
         )

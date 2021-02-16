@@ -4,6 +4,7 @@ import tensorflow as tf
 from tensorflow.keras import mixed_precision as mxp
 
 from rnnt_encoder import RNNTEncoder
+from spec_augment import SpectrogramAugmentation
 from transducer_joint import TransducerJoint
 from transducer_loss import TransducerLoss
 from transducer_predictor import TransducerPredictor
@@ -16,6 +17,7 @@ class Transducer(tf.keras.Model):
     def __init__(
         self,
         vocab_size: int,
+        audio_featurizer,
         encoder_reductions: dict = {0: 3, 1: 2},
         encoder_dmodel: int = 640,
         encoder_nlayers: int = 8,
@@ -39,6 +41,8 @@ class Transducer(tf.keras.Model):
     ):
         super().__init__()
 
+        self.spec_augment = SpectrogramAugmentation()
+
         self.encoder = RNNTEncoder(
             reductions=encoder_reductions,
             dmodel=encoder_dmodel,
@@ -50,7 +54,8 @@ class Transducer(tf.keras.Model):
             bias_regularizer=bias_regularizer,
             name=f"{name}_encoder",
         )
-        self.predict_net = TransducerPredictor(
+
+        self.predictor = TransducerPredictor(
             vocab_size=vocab_size,
             embed_dim=prediction_embed_dim,
             num_layers=prediction_num_rnns,
@@ -58,43 +63,55 @@ class Transducer(tf.keras.Model):
             random_state_sampling=True,
             name=f"{name}_prediction",
         )
-        self.joint_net = TransducerJoint(
+
+        self.joint = TransducerJoint(
             vocab_size=vocab_size,
             dim_model=joint_dim,
             activation=joint_activation,
             name=f"{name}_joint",
         )
+
         self.time_reduction_factor = self.encoder.time_reduction_factor
 
+        self.audio_featurizer = audio_featurizer
+
     def _build(self, input_shape):
-        features = tf.keras.Input(shape=input_shape, dtype=tf.float32)
-        input_length = tf.keras.Input(shape=[], dtype=tf.int32)
-        pred = tf.keras.Input(shape=[None], dtype=tf.int32)
-        pred_length = tf.keras.Input(shape=[], dtype=tf.int32)
+        audio_signals = tf.keras.Input(shape=[None], dtype=tf.float32)
+        audio_lens = tf.keras.Input(shape=[], dtype=tf.int32)
+        targets = tf.keras.Input(shape=[None], dtype=tf.int32)
+        target_lens = tf.keras.Input(shape=[], dtype=tf.int32)
         self(
             {
-                "input": features,
-                "input_length": input_length,
-                "prediction": pred,
-                "prediction_length": pred_length,
+                "audio_signals": audio_signals,
+                "audio_lens": audio_lens,
+                "targets": targets,
+                "target_lens": target_lens,
             },
-            training=True,
         )
 
-    def call(self, inputs, training=False, **kwargs):
-        features = inputs["input"]
-        prediction = inputs["prediction"]
-        prediction_length = inputs["prediction_length"]
-        enc = self.encoder(features, training=training, **kwargs)
-        pred = self.predict_net(
-            [prediction, prediction_length], training=training, **kwargs
+    def call(self, inputs, training=False):
+        audio_signals = inputs["audio_signals"]
+        audio_lens = inputs["audio_lens"]
+        targets = inputs["targets"]
+        target_lens = inputs["target_lens"]
+
+        audio_features, audio_lens = self.audio_featurizer.tf_extract(
+            audio_signals, audio_lens
         )
-        outputs = self.joint_net([enc, pred], training=training, **kwargs)
+
+        if training:
+            audio_features = tf.squeeze(audio_features, axis=-1)
+            audio_features = self.spec_augment(audio_features)
+            audio_features = tf.expand_dims(audio_features, axis=-1)
+
+        encoded_outs = self.encoder(audio_features)
+        decoded_outs = self.predictor([targets, target_lens])
+
+        logits = self.joint([encoded_outs, decoded_outs])
+
         return {
-            "logit": outputs,
-            "logit_length": get_reduced_length(
-                inputs["input_length"], self.time_reduction_factor
-            ),
+            "logits": logits,
+            "logit_lens": get_reduced_length(audio_lens, self.time_reduction_factor),
         }
 
     def compile(
@@ -125,33 +142,31 @@ class Transducer(tf.keras.Model):
         with tf.GradientTape() as tape:
             y_pred = self(
                 {
-                    "input": x["input"],
-                    "input_length": x["input_length"],
-                    "prediction": x["prediction"],
-                    "prediction_length": x["prediction_length"],
+                    "audio_signals": x["audio_signals"],
+                    "audio_lens": x["audio_lens"],
+                    "targets": x["targets"],
+                    "target_lens": x["target_lens"],
                 },
-                training=True,
             )
             loss = self.loss(y_true, y_pred)
             scaled_loss = self.optimizer.get_scaled_loss(loss)
         scaled_gradients = tape.gradient(scaled_loss, self.trainable_weights)
         gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        return {"train_rnnt_loss": loss}
+        return {"train_loss": loss}
 
     def test_step(self, batch):
         x, y_true = batch
         y_pred = self(
             {
-                "input": x["input"],
-                "input_length": x["input_length"],
-                "prediction": x["prediction"],
-                "prediction_length": x["prediction_length"],
+                "audio_signals": x["audio_signals"],
+                "audio_lens": x["audio_lens"],
+                "targets": x["targets"],
+                "target_lens": x["target_lens"],
             },
-            training=False,
         )
         loss = self.loss(y_true, y_pred)
-        return {"val_rnnt_loss": loss}
+        return {"val_loss": loss}
 
     def encoder_inference(self, features: tf.Tensor, states: tf.Tensor):
         """Infer function for encoder (or encoders)
@@ -187,11 +202,11 @@ class Transducer(tf.keras.Model):
         with tf.name_scope(f"{self.name}_decoder"):
             encoded = tf.reshape(encoded, [1, 1, -1])  # [E] => [1, 1, E]
             predicted = tf.reshape(predicted, [1, 1])  # [] => [1, 1]
-            y, new_states = self.predict_net.recognize(
+            y, new_states = self.predictor.recognize(
                 predicted, states
             )  # [1, 1, P], states
             ytu = tf.nn.log_softmax(
-                self.joint_net([encoded, y], training=False)
+                self.joint([encoded, y], training=False)
             )  # [1, 1, V]
             ytu = tf.reshape(ytu, shape=[-1])  # [1, 1, V] => [V]
             return ytu, new_states
@@ -280,7 +295,7 @@ class Transducer(tf.keras.Model):
                     encoded=encoded[batch],
                     encoded_length=encoded_length[batch],
                     predicted=tf.constant(self.text_featurizer.blank, dtype=tf.int32),
-                    states=self.predict_net.get_initial_state(),
+                    states=self.predictor.get_initial_state(),
                     parallel_iterations=parallel_iterations,
                     swap_memory=swap_memory,
                 )
@@ -443,7 +458,7 @@ class Transducer(tf.keras.Model):
                     self.encoder.get_initial_state().get_shape(), dtype=tf.float32
                 ),
                 tf.TensorSpec(
-                    self.predict_net.get_initial_state().get_shape(), dtype=tf.float32
+                    self.predictor.get_initial_state().get_shape(), dtype=tf.float32
                 ),
             ],
         )

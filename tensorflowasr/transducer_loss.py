@@ -27,10 +27,10 @@ class TransducerLoss(tf.keras.losses.Loss):
         self.global_batch_size = global_batch_size
 
     def call(self, y_true, y_pred):
-        logits = y_pred["logit"]
-        logit_length = y_pred["logit_length"]
-        labels = y_true["label"]
-        label_length = y_true["label_length"]
+        logits = y_pred["logits"]
+        logit_length = y_pred["logit_lens"]
+        labels = y_true["labels"]
+        label_length = y_true["label_lens"]
         loss = rnnt_loss(logits, labels, label_length, logit_length)
         return tf.nn.compute_average_loss(
             loss, global_batch_size=self.global_batch_size

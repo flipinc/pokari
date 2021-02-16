@@ -28,7 +28,7 @@ if gpus:
 
 strategy = tf.distribute.MirroredStrategy()
 
-speech_featurizer = AudioFeaturizer(**OmegaConf.to_container(args.speech_config))
+audio_featurizer = AudioFeaturizer(**OmegaConf.to_container(args.speech_config))
 
 if args.subwords and os.path.exists(args.subwords):
     print("Loading subwords ...")
@@ -45,15 +45,15 @@ else:
     text_featurizer.save_to_file(args.subwords)
 
 train_dataset = Dataset(
-    speech_featurizer=speech_featurizer,
+    speech_featurizer=audio_featurizer,
     text_featurizer=text_featurizer,
-    **OmegaConf.to_container(args.learning_config.train_dataset_config)
+    **OmegaConf.to_container(args.learning_config.train_dataset_config),
 )
 
 eval_dataset = Dataset(
-    speech_featurizer=speech_featurizer,
+    speech_featurizer=audio_featurizer,
     text_featurizer=text_featurizer,
-    **OmegaConf.to_container(args.learning_config.eval_dataset_config)
+    **OmegaConf.to_container(args.learning_config.eval_dataset_config),
 )
 
 with strategy.scope():
@@ -62,9 +62,10 @@ with strategy.scope():
 
     transducer = Transducer(
         **OmegaConf.to_container(args.model_config),
-        vocab_size=text_featurizer.num_classes
+        vocab_size=text_featurizer.num_classes,
+        audio_featurizer=audio_featurizer,
     )
-    transducer._build(speech_featurizer.shape)
+    transducer._build(audio_featurizer.shape)
     transducer.summary(line_length=150)
 
     optimizer = tf.keras.optimizers.get(

@@ -38,14 +38,14 @@ class AudioFeaturizer:
         features = self.tf_extract(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
-    def tf_extract(self, audio_signals):
+    def tf_extract(self, audio_signals, audio_lens):
         # COMPAT (short for compatibility)
-        audio_signals = tf.expand_dims(audio_signals, axis=0)
+        # audio_signals = tf.expand_dims(audio_signals, axis=0)
 
         x = audio_signals
         del audio_signals
 
-        # audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
+        audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
 
         # dither
         if self.dither > 0:
@@ -61,7 +61,7 @@ class AudioFeaturizer:
                 axis=1,
             )
 
-        # [1, T, nfft/2]
+        # [B, T, nfft/2]
         # TODO: is there tensorflow version of torch.cuda.amp.autocast(enabled=False)?
         spectrograms = tf.square(
             tf.abs(
@@ -84,30 +84,31 @@ class AudioFeaturizer:
             upper_edge_hertz=(self.sample_rate / 2),
         )
 
-        # mel spectrograms -> [1, T, m_mels]
+        # mel spectrograms -> [B, T, m_mels]
         x = tf.matmul(spectrograms, mel_weight)
         del spectrograms
 
         # power to decibel
         x = self.power_to_db(x)
 
-        # [1, n_mels, T]
+        # [B, n_mels, T]
         x = tf.transpose(x, (0, 2, 1))
 
         # normalize if required
         if self.normalize_type is not None:
-            x = self.normalize(x, tf.shape(x)[2])
-            # x = self.normalize_batch(x, audio_lens)
+            x = self.normalize(x, audio_lens)
 
         # TODO: pad to multiple of 8 for efficient tensor core use
 
-        # COMPAT
-        x = tf.transpose(x, (2, 1, 0))
+        # COMPAT: Expand channel dim -> [B, T, n_mels, 1]
+        x = tf.transpose(x, (0, 2, 1))
+        x = tf.expand_dims(x, axis=-1)
 
-        return x
+        return x, audio_lens
 
     def power_to_db(self, magnitude, ref=1.0, amin=1e-10, top_db=80.0):
         """Conversion from power to decibels. Based off librosa's power_to_db."""
+
         def log10(x):
             numerator = tf.math.log(x)
             denominator = tf.math.log(tf.constant(10, dtype=numerator.dtype))
@@ -133,19 +134,17 @@ class AudioFeaturizer:
 
         CONSTANT = 1e-6
 
+        bs = tf.shape(x)[0]
+
         if self.normalize_type == "per_feature":
-            mean_list = tf.TensorArray(
-                tf.float32, size=tf.shape(x)[0], clear_after_read=True
-            )
-            std_list = tf.TensorArray(
-                tf.float32, size=tf.shape(x)[0], clear_after_read=True
-            )
-            for i in range(tf.shape(x)[0]):
+            mean_list = tf.TensorArray(tf.float32, size=bs, clear_after_read=True)
+            std_list = tf.TensorArray(tf.float32, size=bs, clear_after_read=True)
+            for i in range(bs):
                 mean_list = mean_list.write(
-                    i, tf.math.reduce_mean(x[i, :, :audio_lens], axis=1)
+                    i, tf.math.reduce_mean(x[i, :, : audio_lens[i]], axis=1)
                 )
                 std_list = std_list.write(
-                    i, tf.math.reduce_std(x[i, :, :audio_lens], axis=1)
+                    i, tf.math.reduce_std(x[i, :, : audio_lens[i]], axis=1)
                 )
             x_mean = mean_list.stack()
             x_std = std_list.stack()
