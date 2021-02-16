@@ -1,11 +1,15 @@
 import collections
+import os
 
 import tensorflow as tf
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from tensorflow.keras import mixed_precision as mxp
 
+from audio_featurizer import AudioFeaturizer
+from dataset import Dataset
 from spec_augment import SpectrogramAugmentation
+from text_featurizer import SubwordFeaturizer
 from transducer_loss import TransducerLoss
 from utils import pad_prediction_tfarray
 
@@ -15,37 +19,90 @@ Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "state
 class Transducer(tf.keras.Model):
     def __init__(
         self,
-        vocab_size: int,
-        audio_featurizer,
         cfgs: DictConfig,
-        **kwargs,
+        global_batch_size: int,
     ):
         super().__init__()
 
-        self.spec_augment = SpectrogramAugmentation()
+        self.audio_featurizer = AudioFeaturizer(
+            **OmegaConf.to_container(cfgs.audio_feature)
+        )
+        self.spec_augment = SpectrogramAugmentation(
+            **OmegaConf.to_container(cfgs.spec_augment)
+        )
+
+        if cfgs.subwords and os.path.exists(cfgs.subwords):
+            print("Loading subwords ...")
+            text_featurizer = SubwordFeaturizer.load_from_file(
+                OmegaConf.to_container(cfgs.decoder_config),
+                cfgs.subwords,
+            )
+        else:
+            print("Generating subwords ...")
+            text_featurizer = SubwordFeaturizer.build_from_corpus(
+                OmegaConf.to_container(cfgs.decoder_config),
+                cfgs.subwords_corpus,
+            )
+            text_featurizer.save_to_file(cfgs.subwords)
+
+        vocab_size = text_featurizer.num_classes
+
+        train_dataset = Dataset(
+            speech_featurizer=self.audio_featurizer,
+            text_featurizer=text_featurizer,
+            **OmegaConf.to_container(cfgs.learning_config.train_dataset_config),
+        )
+        self.train_steps = train_dataset.total_steps
+        self.train_dl = train_dataset.create(global_batch_size)
+
+        eval_dataset = Dataset(
+            speech_featurizer=self.audio_featurizer,
+            text_featurizer=text_featurizer,
+            **OmegaConf.to_container(cfgs.learning_config.eval_dataset_config),
+        )
+        self.val_dl = eval_dataset.create(global_batch_size)
 
         self.encoder = instantiate(cfgs.encoder)
         self.predictor = instantiate(cfgs.predictor, vocab_size=vocab_size)
         self.joint = instantiate(cfgs.joint, vocab_size=vocab_size)
 
-        self.time_reduction_factor = self.encoder.time_reduction_factor
+        optimizer = tf.keras.optimizers.get(
+            OmegaConf.to_container(cfgs.learning_config.optimizer_config)
+        )
+        self.compile(
+            optimizer=optimizer,
+            global_batch_size=global_batch_size,
+            blank=text_featurizer.blank,
+        )
 
-        self.audio_featurizer = audio_featurizer
+        self.callbacks = [
+            tf.keras.callbacks.ModelCheckpoint(
+                **OmegaConf.to_container(cfgs.learning_config.running_config.checkpoint)
+            ),
+            tf.keras.callbacks.experimental.BackupAndRestore(
+                cfgs.learning_config.running_config.states_dir
+            ),
+            tf.keras.callbacks.TensorBoard(
+                **OmegaConf.to_container(
+                    cfgs.learning_config.running_config.tensorboard
+                )
+            ),
+        ]
 
-    def _build(self, input_shape):
-        audio_signals = tf.keras.Input(shape=[None], dtype=tf.float32)
-        audio_lens = tf.keras.Input(shape=[], dtype=tf.int32)
-        targets = tf.keras.Input(shape=[None], dtype=tf.int32)
-        target_lens = tf.keras.Input(shape=[], dtype=tf.int32)
+        self.num_epochs = cfgs.learning_config.running_config.num_epochs
+
+    def _build(self):
         self(
             {
-                "audio_signals": audio_signals,
-                "audio_lens": audio_lens,
-                "targets": targets,
-                "target_lens": target_lens,
+                "audio_signals": tf.keras.Input(shape=[None], dtype=tf.float32),
+                "audio_lens": tf.keras.Input(shape=[], dtype=tf.int32),
+                "targets": tf.keras.Input(shape=[None], dtype=tf.int32),
+                "target_lens": tf.keras.Input(shape=[], dtype=tf.int32),
             },
             training=True,
         )
+
+        self.summary(line_length=150)
 
     def call(self, inputs, training=False):
         audio_signals = inputs["audio_signals"]
@@ -68,6 +125,15 @@ class Transducer(tf.keras.Model):
         logits = self.joint([encoded_outs, decoded_outs])
 
         return {"logits": logits, "logit_lens": audio_lens}
+
+    def train(self):
+        super(Transducer, self).fit(
+            self.train_dl,
+            epochs=self.num_epochs,
+            validation_data=self.val_dl,
+            callbacks=self.callbacks,
+            steps_per_epoch=self.train_steps,
+        )
 
     def compile(
         self,

@@ -71,7 +71,7 @@ class RNNTEncoder(tf.keras.layers.Layer):
         audio_lens = get_reduced_length(audio_lens, self.time_reduction_factor)
 
         for block in self.blocks:
-            x = block(x, training=training, **kwargs)
+            x = block(x, audio_lens, training=training, **kwargs)
 
         return x, audio_lens
 
@@ -122,7 +122,6 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         self.rnn = tf.keras.layers.LSTM(
             units=num_units,
             return_sequences=True,
-            name=f"{self.name}_lstm",
             return_state=True,
         )
 
@@ -133,13 +132,11 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
             name=f"{self.name}_projection",
         )
 
-    def call(self, x, training=False, **kwargs):
+    def call(self, x, x_len, training=False, **kwargs):
         if self.reduction is not None:
             x = self.reduction(x)
-        x = self.rnn(x, training=training)
-        x = x[0]
-        if self.ln is not None:
-            x = self.ln(x, training=training)
+        (x, _, _) = self.rnn(x)
+        x = self.ln(x, training=training)
         x = self.projection(x, training=training)
         return x
 
