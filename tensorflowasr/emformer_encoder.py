@@ -3,7 +3,8 @@ from typing import Optional
 
 import numpy as np
 import tensorflow as tf
-from modules.subsample import VggSubsample, stack_subsample
+
+from subsample import VggSubsample, stack_subsample
 
 
 class EmformerEncoder(tf.keras.layers.Layer):
@@ -217,8 +218,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 )
 
         # 1. projection
-        x = tf.transpose(audio_features, (0, 2, 1))
-        x = self.linear(x)
+        x = self.linear(audio_features)
 
         # 2. vgg subsampling
         if self.subsampling == "stack":
@@ -263,7 +263,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. Trim right context
         x = x[:, : self.chunk_length, :]
-        x = tf.transpose(x, (0, 2, 1))
 
         new_audio_lens = tf.repeat(self.chunk_length, [bs])
 
@@ -271,8 +270,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
     def full_context(self, audio_features: tf.Tensor, audio_lens: tf.Tensor):
         # 1. projection
-        x = tf.transpose(audio_features, [0, 2, 1])
-        x = self.linear(x)
+        x = self.linear(audio_features)
 
         # 2. subsampling
         if self.subsampling == "stack":
@@ -298,9 +296,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 6. Trim copied right context
         # TODO: does len() work in graph mode?
         x = x[:, len(right_indexes) :, :]
-        x = tf.transpose(x, [0, 2, 1])
 
-        return x, audio_lens, None, None
+        return x, audio_lens
 
     def call(
         self,
@@ -316,25 +313,18 @@ class EmformerEncoder(tf.keras.layers.Layer):
         D_2: encoder dim.
 
         Args:
-            audio_features (tf.Tensor): [B, D_1, Tmax]
+            audio_features (tf.Tensor): [B, Tmax, D_1]
             audio_lens (np.array): [B]
 
         Returns:
-            tf.Tensor: [B, D_2, Tmax]
+            tf.Tensor: [B, Tmax, D_2]
         """
-
-        audio_features = tf.transpose(audio_features, (0, 2, 1))
-
         if mode == "full_context":
-            x = self.full_context(audio_features, audio_lens)
+            return self.full_context(audio_features, audio_lens)
         elif mode == "stream":
-            x = self.stream(audio_features, audio_lens, cache_k, cache_v)
+            return self.stream(audio_features, audio_lens, cache_k, cache_v)
         else:
             raise ValueError(f"Invalid mode {mode}")
-
-        x = tf.transpose(audio_features, (0, 2, 1))
-
-        return x
 
 
 class EmformerBlock(tf.keras.layers.Layer):

@@ -15,17 +15,17 @@ class Dataset:
     def __init__(
         self,
         stage: str,
-        speech_featurizer,
+        audio_featurizer,
         text_featurizer,
         data_paths: list,
         cache: bool = False,
         shuffle: bool = False,
-        use_tf: bool = False,
         drop_remainder: bool = True,
         buffer_size: int = BUFFER_SIZE,
+        num_print_sample_data: int = 0,
         **kwargs,
     ):
-        self.speech_featurizer = speech_featurizer
+        self.audio_featurizer = audio_featurizer
         self.text_featurizer = text_featurizer
         self.data_paths = data_paths
         self.cache = cache  # whether to cache WHOLE transformed dataset to memory
@@ -34,13 +34,12 @@ class Dataset:
             raise ValueError("buffer_size must be positive when shuffle is on")
         self.buffer_size = buffer_size  # shuffle buffer size
         self.stage = stage  # for defining tfrecords files
-        self.use_tf = use_tf
         self.drop_remainder = (
             drop_remainder  # whether to drop remainder for multi gpu training
         )
         self.steps_per_epoch = None  # for better training visualization
 
-        self.num_print_sample_data = 2
+        self.num_print_sample_data = num_print_sample_data
 
     def create(self, batch_size: int):
         self.read_entries()
@@ -95,8 +94,11 @@ class Dataset:
             dataset = dataset.shuffle(self.buffer_size, reshuffle_each_iteration=True)
 
         if self.num_print_sample_data:
-            for d in dataset.take(self.num_print_sample_data):
-                print(d)
+            for d, _ in dataset.take(self.num_print_sample_data):
+                print("\n🎤 audio_signals:\n", d["audio_signals"])
+                print("\n🔭 audio_lens:\n", d["audio_lens"])
+                print("\n🎯 targets:\n", d["targets"])
+                print("\n👀 target_lens:\n", d["target_lens"])
 
         dataset = dataset.padded_batch(
             batch_size=batch_size,
@@ -142,7 +144,7 @@ class Dataset:
             return tf.reshape(resampled, shape=[-1])  # reshape for using tf.signal
 
         with tf.device("/CPU:0"):
-            audio_signal = tf_read_raw_audio(audio, self.speech_featurizer.sample_rate)
+            audio_signal = tf_read_raw_audio(audio, self.audio_featurizer.sample_rate)
 
             audio_len = tf.cast(tf.shape(audio_signal)[0], tf.int32)
 
