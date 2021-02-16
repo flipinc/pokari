@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from spec_augment import SpecAugment
+from spec_augment import SpectrogramAugmentation
 
 AUGMENTATIONS = {}
 
@@ -24,7 +24,7 @@ class Augmentation:
 
         self.before = self.tf_parse(config.pop("before", {}))
         # self.after = self.tf_parse(config.pop("after", {}))
-        self.after = AugmentationExecutor([SpecAugment()])
+        self.after = AugmentationExecutor([SpectrogramAugmentation()])
 
     @staticmethod
     def tf_parse(config: dict) -> list:

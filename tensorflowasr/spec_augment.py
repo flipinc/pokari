@@ -5,7 +5,7 @@ import tensorflow as tf
 from utils import shape_list
 
 
-class SpecAugment:
+class SpectrogramAugmentation:
     """
     Zeroes out(cuts) random continuous horisontal or vertical segments of
     the spectrogram as described in SpecAugment (https://arxiv.org/abs/1904.08779).
@@ -44,11 +44,9 @@ class SpecAugment:
             self.adaptive_temporal_width = True
 
     @tf.function
-    def augment(self, audio_signals):
-        # T, num_feature_bins, V
-
-        # COMPATI
-        audio_signals = tf.transpose(audio_signals, (2, 1, 0))
+    def __call__(self, audio_signals):
+        # [B, T, D] -> [B, D, T]
+        audio_signals = tf.transpose(audio_signals, (0, 2, 1))
 
         _, f, t = shape_list(audio_signals)
 
@@ -94,7 +92,7 @@ class SpecAugment:
 
         audio_signals = tf.map_fn(specaug, audio_signals)
 
-        # COMPATI
+        # [B, D, T] -> [B, T, D]
         audio_signals = tf.transpose(audio_signals, (2, 1, 0))
 
         return audio_signals
