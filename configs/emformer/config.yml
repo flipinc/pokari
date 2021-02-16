@@ -1,3 +1,29 @@
+encoder:
+  _target_: rnnt_encoder.RNNTEncoder
+
+  name: rnnt_encoder
+
+  dim_model: 320
+  num_units: 1024
+  num_layers: 8
+  reduction_indices: [0, 1]
+  reduction_factors: [3, 2]
+
+predictor:
+  _target_: transducer_predictor.TransducerPredictor
+
+  num_layers: 2
+  embed_dim: 320
+  dim_model: 1024
+  
+  random_state_sampling: true
+
+joint:
+  _target_: transducer_joint.TransducerJoint
+
+  dim_model: 320
+  activation: tanh
+
 speech_config:
   sample_rate: 16000
   # frame_ms: 25
@@ -16,27 +42,6 @@ decoder_config:
   blank_at_zero: true
   beam_width: 5
   norm_score: true
-
-model_config:
-  name: streaming_transducer
-  # Note(keisuke): use default value as yaml does not support dict with number as an index
-  # encoder_reductions:
-  #   - 3 
-  #   - 2
-  encoder_dmodel: 320
-  encoder_rnn_type: lstm
-  encoder_rnn_units: 1024
-  encoder_nlayers: 8
-  encoder_layer_norm: true
-  prediction_embed_dim: 320
-  prediction_embed_dropout: 0.0
-  prediction_num_rnns: 2
-  prediction_rnn_units: 1024
-  prediction_rnn_type: lstm
-  prediction_projection_units: 320
-  prediction_layer_norm: true
-  joint_dim: 320
-  joint_activation: tanh
 
 learning_config:
   train_dataset_config:

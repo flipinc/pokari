@@ -1,13 +1,12 @@
 import collections
 
 import tensorflow as tf
+from hydra.utils import instantiate
+from omegaconf import DictConfig
 from tensorflow.keras import mixed_precision as mxp
 
-from rnnt_encoder import RNNTEncoder
 from spec_augment import SpectrogramAugmentation
-from transducer_joint import TransducerJoint
 from transducer_loss import TransducerLoss
-from transducer_predictor import TransducerPredictor
 from utils import pad_prediction_tfarray
 
 Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
@@ -18,58 +17,16 @@ class Transducer(tf.keras.Model):
         self,
         vocab_size: int,
         audio_featurizer,
-        encoder_reductions: dict = {0: 3, 1: 2},
-        encoder_dmodel: int = 640,
-        encoder_nlayers: int = 8,
-        encoder_rnn_type: str = "lstm",
-        encoder_rnn_units: int = 2048,
-        encoder_layer_norm: bool = True,
-        prediction_embed_dim: int = 320,
-        prediction_embed_dropout: float = 0,
-        prediction_num_rnns: int = 2,
-        prediction_rnn_units: int = 2048,
-        prediction_rnn_type: str = "lstm",
-        prediction_layer_norm: bool = True,
-        prediction_projection_units: int = 640,
-        joint_dim: int = 640,
-        joint_activation: str = "tanh",
-        prejoint_linear: bool = True,
-        kernel_regularizer=None,
-        bias_regularizer=None,
-        name="StreamingTransducer",
+        cfgs: DictConfig,
         **kwargs,
     ):
         super().__init__()
 
         self.spec_augment = SpectrogramAugmentation()
 
-        self.encoder = RNNTEncoder(
-            reductions=encoder_reductions,
-            dmodel=encoder_dmodel,
-            nlayers=encoder_nlayers,
-            rnn_type=encoder_rnn_type,
-            rnn_units=encoder_rnn_units,
-            layer_norm=encoder_layer_norm,
-            kernel_regularizer=kernel_regularizer,
-            bias_regularizer=bias_regularizer,
-            name=f"{name}_encoder",
-        )
-
-        self.predictor = TransducerPredictor(
-            vocab_size=vocab_size,
-            embed_dim=prediction_embed_dim,
-            num_layers=prediction_num_rnns,
-            dim_model=prediction_rnn_units,
-            random_state_sampling=True,
-            name=f"{name}_prediction",
-        )
-
-        self.joint = TransducerJoint(
-            vocab_size=vocab_size,
-            dim_model=joint_dim,
-            activation=joint_activation,
-            name=f"{name}_joint",
-        )
+        self.encoder = instantiate(cfgs.encoder)
+        self.predictor = instantiate(cfgs.predictor, vocab_size=vocab_size)
+        self.joint = instantiate(cfgs.joint, vocab_size=vocab_size)
 
         self.time_reduction_factor = self.encoder.time_reduction_factor
 
