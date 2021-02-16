@@ -43,10 +43,10 @@ class VggSubsample(tf.keras.layers.Layer):
 
     def __init__(
         self,
-        subsampling_factor,
-        feat_in,
-        feat_out,
-        conv_channels,
+        subsampling_factor: int,
+        feat_in: int,
+        feat_out: int,
+        conv_channels: int,
         activation=tf.keras.activations.relu,
     ):
         super().__init__()
@@ -118,43 +118,37 @@ class VggSubsample(tf.keras.layers.Layer):
             tf.int32,
         )
 
-    def call(self, audio_signals: tf.Tensor, audio_lens: tf.Tensor):
+    def call(self, x: tf.Tensor, audio_lens: tf.Tensor):
         """
         Args:
-            audio_signals (torch.Tensor): [B, Tmax, D]
+            x (torch.Tensor): [B, Tmax, D]
 
         Returns:
             [B, Tmax, D]
         """
         # 1. add padding to make this causal convolution
         padding = tf.constant([[0, 0], [1, 1], [self.left_padding, 0]])
-        audio_signals = tf.pad(audio_signals, padding)
+        x = tf.pad(x, padding)
 
         # 2. forward
-        audio_signals = tf.expand_dims(audio_signals, axis=-1)
-        audio_signals = self.conv(audio_signals)
-        b = tf.shape(audio_signals)[0]
-        t = tf.shape(audio_signals)[1]
-        f = tf.shape(audio_signals)[2]
-        c = tf.shape(audio_signals)[3]
-        audio_signals = tf.reshape(audio_signals, [b, t, c * f])
-        audio_signals = self.out(audio_signals)
+        x = tf.expand_dims(x, axis=-1)
+        x = self.conv(x)
+
+        b, t, f, c = shape_list(x)
+        x = tf.reshape(x, [b, t, c * f])
+        x = self.out(x)
 
         # 3. calculate new length
         # TODO: improve the performance of length calculation
         for i in range(self.sampling_num):
             audio_lens = tf.map_fn(self.calc_tensor_length, audio_lens)
 
-        return audio_signals, audio_lens
+        return x, audio_lens
 
 
-def stack_subsample(
-    audio_signals: tf.Tensor, audio_lens: tf.Tensor, subsampling_factor: int
-):
-    bs = tf.shape(audio_signals)[0]
-    t = tf.shape(audio_signals)[1]
-    f = tf.shape(audio_signals)[2]
+def stack_subsample(x: tf.Tensor, audio_lens: tf.Tensor, subsampling_factor: int):
+    bs, t, f = shape_list(x)
     t_new = tf.math.ceil(t / subsampling_factor)
-    audio_signals = tf.reshape(audio_signals, [bs, t_new, f * subsampling_factor])
+    x = tf.reshape(x, [bs, t_new, f * subsampling_factor])
     audio_lens = tf.math.ceil(audio_lens / subsampling_factor)
-    return audio_signals, audio_lens
+    return x, audio_lens

@@ -1,45 +1,45 @@
+import queue
+
 import tensorflow as tf
 
 from subsample import TimeReduction
-from utils import get_reduced_length, get_rnn
+from utils import get_reduced_length
 
 
 class RNNTEncoder(tf.keras.layers.Layer):
     def __init__(
         self,
-        reductions: dict = {0: 3, 1: 2},
-        dmodel: int = 640,
-        nlayers: int = 8,
-        rnn_type: str = "lstm",
-        rnn_units: int = 2048,
-        layer_norm: bool = True,
-        kernel_regularizer=None,
-        bias_regularizer=None,
+        reduction_indices: list = [0, 1],
+        reduction_factors: list = [3, 2],
+        num_layers: int = 8,
+        dim_model: int = 640,
+        num_units: int = 2048,
+        name: str = "rnnt_encoder",
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(name=name, **kwargs)
 
-        self.blocks = [
-            RNNTEncoderBlock(
-                reduction_factor=reductions.get(
-                    i, 0
-                ),  # key is index, value is the factor
-                dmodel=dmodel,
-                rnn_type=rnn_type,
-                rnn_units=rnn_units,
-                layer_norm=layer_norm,
-                kernel_regularizer=kernel_regularizer,
-                bias_regularizer=bias_regularizer,
-                name=f"{self.name}_block_{i}",
-            )
-            for i in range(nlayers)
-        ]
+        reduction_q = queue.Queue()
+        for factor in reduction_factors:
+            reduction_q.put(factor)
 
+        self.blocks = []
         self.time_reduction_factor = 1
-        for i in range(nlayers):
-            reduction_factor = reductions.get(i, 0)
-            if reduction_factor > 0:
+        for i in range(num_layers):
+            if i in reduction_indices:
+                reduction_factor = reduction_q.get()
                 self.time_reduction_factor *= reduction_factor
+            else:
+                reduction_factor = 0
+
+            self.blocks.append(
+                RNNTEncoderBlock(
+                    reduction_factor=reduction_factor,
+                    dim_model=dim_model,
+                    num_units=num_units,
+                    name=f"{self.name}_block_{i}",
+                )
+            )
 
     def get_initial_state(self):
         """Get zeros states
@@ -63,6 +63,9 @@ class RNNTEncoder(tf.keras.layers.Layer):
         Args:
             x: [B, T, n_mels]
             audio_lens: [B]
+
+        Returns:
+            tf.Tensor: [B, T, D]
 
         """
         audio_lens = get_reduced_length(audio_lens, self.time_reduction_factor)
@@ -103,15 +106,11 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
     def __init__(
         self,
         reduction_factor: int = 0,
-        dmodel: int = 640,
-        rnn_type: str = "lstm",
-        rnn_units: int = 2048,
-        layer_norm: bool = True,
-        kernel_regularizer=None,
-        bias_regularizer=None,
+        dim_model: int = 640,
+        num_units: int = 2048,
         **kwargs,
     ):
-        super(RNNTEncoderBlock, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
         if reduction_factor > 0:
             self.reduction = TimeReduction(
@@ -120,26 +119,18 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         else:
             self.reduction = None
 
-        RNN = get_rnn(rnn_type)
-        self.rnn = RNN(
-            units=rnn_units,
+        self.rnn = tf.keras.layers.LSTM(
+            units=num_units,
             return_sequences=True,
-            name=f"{self.name}_{rnn_type}",
+            name=f"{self.name}_lstm",
             return_state=True,
-            kernel_regularizer=kernel_regularizer,
-            bias_regularizer=bias_regularizer,
         )
 
-        if layer_norm:
-            self.ln = tf.keras.layers.LayerNormalization(name=f"{self.name}_ln")
-        else:
-            self.ln = None
+        self.ln = tf.keras.layers.LayerNormalization(name=f"{self.name}_ln")
 
         self.projection = tf.keras.layers.Dense(
-            dmodel,
+            dim_model,
             name=f"{self.name}_projection",
-            kernel_regularizer=kernel_regularizer,
-            bias_regularizer=bias_regularizer,
         )
 
     def call(self, x, training=False, **kwargs):
