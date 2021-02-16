@@ -24,7 +24,13 @@ joint:
   dim_model: 320
   activation: tanh
 
-speech_config:
+spec_augment:
+  freq_masks: 2
+  time_masks: 2
+  freq_width: 15
+  time_width: 25
+
+audio_feature:
   sample_rate: 16000
   # frame_ms: 25
   # stride_ms: 10

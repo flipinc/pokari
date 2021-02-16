@@ -1,5 +1,4 @@
 import tensorflow as tf
-import tensorflow_addons as tfa
 
 
 class TransducerPredictor(tf.keras.layers.Layer):
@@ -13,6 +12,12 @@ class TransducerPredictor(tf.keras.layers.Layer):
         name="transducer_predictor",
         **kwargs,
     ):
+        """
+
+        TODO: tensorflow_addons's LSTMLayerNorm is too slow. putting layernorm layer after
+            lstm layer substantially increases speed and accuracy. Why?
+
+        """
         super().__init__(name=name, **kwargs)
 
         self.num_layers = num_layers
@@ -20,7 +25,17 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.random_state_sampling = random_state_sampling
 
         self.embed = tf.keras.layers.Embedding(vocab_size, embed_dim, mask_zero=True)
-        self.rnn = LSTMLayerNorm(num_layers, dim_model)
+
+        self.rnns = []
+        for i in range(num_layers):
+            rnn = tf.keras.layers.LSTM(
+                units=dim_model,
+                return_sequences=True,
+                return_state=True,
+                name=f"{name}_lstm_{i}",
+            )
+            ln = tf.keras.layers.LayerNormalization(name=f"{name}_ln_{i}")
+            self.rnns.append({"rnn": rnn, "ln": ln})
 
     def get_initial_state(self, batch_size: int, training: bool = True):
         """
@@ -64,20 +79,31 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         return states.stack()
 
-    def call(self, targets, target_lens, training=False, **kwargs):
+    def call(self, targets, target_lens, training=False):
         """
 
-        targets: [B, U]
-        target_lens: [B]
+        Args:
+            targets: [B, U]
+            target_lens: [B]
 
         """
         bs = tf.shape(targets)[0]
 
-        targets = self.embed(targets)
+        x = self.embed(targets)
         states = self.get_initial_state(bs, training)
-        targets, _ = self.rnn(targets, target_lens, states)
+        # targets, _ = self.rnn(targets, target_lens, states)
 
-        return targets
+        for idx, rnn in enumerate(self.rnns):
+            mask = tf.sequence_mask(target_lens)
+            (x, _, _) = rnn["rnn"](
+                x,
+                training=training,
+                mask=mask,
+                initial_state=tf.unstack(states[idx], axis=0),
+            )
+            x = rnn["ln"](x, training=training)
+
+        return x
 
     def recognize(self, inputs, states):
         """Recognize function for prediction network
@@ -104,47 +130,3 @@ class TransducerPredictor(tf.keras.layers.Layer):
             if rnn["projection"] is not None:
                 outputs = rnn["projection"](outputs, training=False)
         return outputs, tf.stack(new_states, axis=0)
-
-
-class LSTMLayerNorm(tf.keras.layers.Layer):
-    def __init__(self, num_layers: int, dim_model: int):
-        super().__init__()
-
-        self.layers = []
-        for i in range(num_layers):
-            lstm_cell = tfa.rnn.LayerNormLSTMCell(units=dim_model)
-            lstm_rnn = tf.keras.layers.RNN(
-                lstm_cell, return_sequences=True, return_state=True
-            )
-            self.layers.append(lstm_rnn)
-
-    def call(self, inputs, input_lens, states=None):
-        """
-
-        N: number of layers
-
-        Args:
-            inputs: [B, U, D]
-            states: [N, 2, B, D]
-
-        Returns:
-            new_states: [N, 2, B, D]
-
-        """
-        new_states = tf.TensorArray(
-            self.dtype, size=len(self.layers), clear_after_read=True
-        )
-
-        outputs = inputs
-        del inputs
-
-        for i, layer in enumerate(self.layers):
-            # h and c only accept tuple as an input
-            # h, c -> [B, D]
-            mask = tf.sequence_mask(input_lens)
-            (outputs, h, c) = layer(outputs, (states[i][0], states[i][1]), mask=mask)
-            new_states = new_states.write(i, (h, c))
-
-        new_states = new_states.stack()
-
-        return outputs, new_states
