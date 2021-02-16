@@ -22,7 +22,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.embed = tf.keras.layers.Embedding(vocab_size, embed_dim, mask_zero=True)
         self.rnn = LSTMLayerNorm(num_layers, dim_model)
 
-    def initialize_state(self, batch_size: int, training: bool = True):
+    def get_initial_state(self, batch_size: int, training: bool = True):
         """
 
         N: number of predictor network layers
@@ -64,19 +64,17 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         return states.stack()
 
-    def call(self, inputs, training=False, **kwargs):
+    def call(self, targets, target_lens, training=False, **kwargs):
         """
 
         targets: [B, U]
         target_lens: [B]
 
         """
-        targets, target_lens = inputs
-
         bs = tf.shape(targets)[0]
 
         targets = self.embed(targets)
-        states = self.initialize_state(bs, training)
+        states = self.get_initial_state(bs, training)
         targets, _ = self.rnn(targets, target_lens, states)
 
         return targets

@@ -1,7 +1,7 @@
 import tensorflow as tf
 
-from subsampling import TimeReduction
-from utils import get_rnn, merge_two_last_dims
+from subsample import TimeReduction
+from utils import get_reduced_length, get_rnn
 
 
 class RNNTEncoder(tf.keras.layers.Layer):
@@ -19,10 +19,8 @@ class RNNTEncoder(tf.keras.layers.Layer):
     ):
         super().__init__(**kwargs)
 
-        self.reshape = Reshape(name=f"{self.name}_reshape")
-
         self.blocks = [
-            StreamingTransducerBlock(
+            RNNTEncoderBlock(
                 reduction_factor=reductions.get(
                     i, 0
                 ),  # key is index, value is the factor
@@ -59,11 +57,20 @@ class RNNTEncoder(tf.keras.layers.Layer):
             )
         return tf.stack(states, axis=0)
 
-    def call(self, inputs, training=False, **kwargs):
-        outputs = self.reshape(inputs)
+    def call(self, x, audio_lens, training=False, **kwargs):
+        """
+
+        Args:
+            x: [B, T, n_mels]
+            audio_lens: [B]
+
+        """
+        audio_lens = get_reduced_length(audio_lens, self.time_reduction_factor)
+
         for block in self.blocks:
-            outputs = block(outputs, training=training, **kwargs)
-        return outputs
+            x = block(x, training=training, **kwargs)
+
+        return x, audio_lens
 
     def recognize(self, inputs, states):
         """Recognize function for encoder network
@@ -92,12 +99,7 @@ class RNNTEncoder(tf.keras.layers.Layer):
         return conf
 
 
-class Reshape(tf.keras.layers.Layer):
-    def call(self, inputs):
-        return merge_two_last_dims(inputs)
-
-
-class StreamingTransducerBlock(tf.keras.Model):
+class RNNTEncoderBlock(tf.keras.layers.Layer):
     def __init__(
         self,
         reduction_factor: int = 0,
@@ -109,7 +111,7 @@ class StreamingTransducerBlock(tf.keras.Model):
         bias_regularizer=None,
         **kwargs,
     ):
-        super(StreamingTransducerBlock, self).__init__(**kwargs)
+        super(RNNTEncoderBlock, self).__init__(**kwargs)
 
         if reduction_factor > 0:
             self.reduction = TimeReduction(
@@ -140,28 +142,26 @@ class StreamingTransducerBlock(tf.keras.Model):
             bias_regularizer=bias_regularizer,
         )
 
-    def call(self, inputs, training=False, **kwargs):
-        outputs = inputs
+    def call(self, x, training=False, **kwargs):
         if self.reduction is not None:
-            outputs = self.reduction(outputs)
-        outputs = self.rnn(outputs, training=training)
-        outputs = outputs[0]
+            x = self.reduction(x)
+        x = self.rnn(x, training=training)
+        x = x[0]
         if self.ln is not None:
-            outputs = self.ln(outputs, training=training)
-        outputs = self.projection(outputs, training=training)
-        return outputs
+            x = self.ln(x, training=training)
+        x = self.projection(x, training=training)
+        return x
 
-    def recognize(self, inputs, states):
-        outputs = inputs
+    def recognize(self, x, states):
         if self.reduction is not None:
-            outputs = self.reduction(outputs)
-        outputs = self.rnn(outputs, training=False, initial_state=states)
-        new_states = tf.stack(outputs[1:], axis=0)
-        outputs = outputs[0]
+            x = self.reduction(x)
+        x = self.rnn(x, training=False, initial_state=states)
+        new_states = tf.stack(x[1:], axis=0)
+        x = x[0]
         if self.ln is not None:
-            outputs = self.ln(outputs, training=False)
-        outputs = self.projection(outputs, training=False)
-        return outputs, new_states
+            x = self.ln(x, training=False)
+        x = self.projection(x, training=False)
+        return x, new_states
 
     def get_config(self):
         conf = {}

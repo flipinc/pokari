@@ -100,9 +100,8 @@ class AudioFeaturizer:
 
         # TODO: pad to multiple of 8 for efficient tensor core use
 
-        # COMPAT: Expand channel dim -> [B, T, n_mels, 1]
+        # [B, T, n_mels]
         x = tf.transpose(x, (0, 2, 1))
-        x = tf.expand_dims(x, axis=-1)
 
         return x, audio_lens
 

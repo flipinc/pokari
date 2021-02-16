@@ -93,6 +93,6 @@ class SpectrogramAugmentation:
         audio_signals = tf.map_fn(specaug, audio_signals)
 
         # [B, D, T] -> [B, T, D]
-        audio_signals = tf.transpose(audio_signals, (2, 1, 0))
+        audio_signals = tf.transpose(audio_signals, (0, 2, 1))
 
         return audio_signals
