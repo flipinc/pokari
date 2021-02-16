@@ -4,7 +4,6 @@ import os
 import tensorflow as tf
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from tensorflow.keras import mixed_precision as mxp
 
 from audio_featurizer import AudioFeaturizer
 from dataset import Dataset
@@ -45,51 +44,121 @@ class Transducer(tf.keras.Model):
             )
             text_featurizer.save_to_file(cfgs.subwords)
 
-        vocab_size = text_featurizer.num_classes
-
-        train_dataset = Dataset(
-            speech_featurizer=self.audio_featurizer,
-            text_featurizer=text_featurizer,
-            **OmegaConf.to_container(cfgs.learning_config.train_dataset_config),
-        )
-        self.train_steps = train_dataset.total_steps
-        self.train_dl = train_dataset.create(global_batch_size)
-
-        eval_dataset = Dataset(
-            speech_featurizer=self.audio_featurizer,
-            text_featurizer=text_featurizer,
-            **OmegaConf.to_container(cfgs.learning_config.eval_dataset_config),
-        )
-        self.val_dl = eval_dataset.create(global_batch_size)
-
         self.encoder = instantiate(cfgs.encoder)
-        self.predictor = instantiate(cfgs.predictor, vocab_size=vocab_size)
-        self.joint = instantiate(cfgs.joint, vocab_size=vocab_size)
-
-        optimizer = tf.keras.optimizers.get(
-            OmegaConf.to_container(cfgs.learning_config.optimizer_config)
+        self.predictor = instantiate(
+            cfgs.predictor, num_classes=text_featurizer.num_classes
         )
-        self.compile(
-            optimizer=optimizer,
-            global_batch_size=global_batch_size,
-            blank=text_featurizer.blank,
+        self.joint = instantiate(cfgs.joint, num_classes=text_featurizer.num_classes)
+
+        (
+            train_dl,
+            train_steps_per_epoch,
+            val_dl,
+            val_steps_per_epoch,
+        ) = self.configure_datasets(
+            text_featurizer, cfgs.train_ds, cfgs.validation_ds, global_batch_size
         )
 
-        self.callbacks = [
-            tf.keras.callbacks.ModelCheckpoint(
-                **OmegaConf.to_container(cfgs.learning_config.running_config.checkpoint)
-            ),
-            tf.keras.callbacks.experimental.BackupAndRestore(
-                cfgs.learning_config.running_config.states_dir
-            ),
-            tf.keras.callbacks.TensorBoard(
-                **OmegaConf.to_container(
-                    cfgs.learning_config.running_config.tensorboard
-                )
-            ),
-        ]
+        optimizer = self.configure_optimizer(
+            optim_cfg=cfgs.optimizer,
+            mxp_enabled=cfgs.trainer.mxp,
+            total_steps=train_steps_per_epoch * cfgs.trainer.epochs,
+        )
 
-        self.num_epochs = cfgs.learning_config.running_config.num_epochs
+        loss = TransducerLoss(
+            blank=text_featurizer.blank, global_batch_size=global_batch_size
+        )
+
+        self.compile_args = {
+            "optimizer": optimizer,
+            "loss": loss,
+            "run_eagerly": cfgs.trainer.run_eagerly,
+            # "loss_weights": loss_weights,
+            # "weighted_metrics": weighted_metrics,
+        }
+
+        self.fit_args = {
+            "x": train_dl,
+            "validation_data": val_dl,
+            "steps_per_epoch": train_steps_per_epoch,
+            "validation_steps": val_steps_per_epoch,
+            "epochs": cfgs.trainer.epochs,
+            # "workers": 4,
+            # "max_queue_size": 10,
+            # "use_multiprocessing": True,
+            "callbacks": [
+                tf.keras.callbacks.ModelCheckpoint(
+                    **OmegaConf.to_container(cfgs.trainer.checkpoint)
+                ),
+                tf.keras.callbacks.experimental.BackupAndRestore(
+                    cfgs.trainer.states_dir
+                ),
+                tf.keras.callbacks.TensorBoard(
+                    **OmegaConf.to_container(cfgs.trainer.tensorboard)
+                ),
+            ],
+        }
+
+    def configure_datasets(
+        self,
+        text_featurizer,
+        train_ds_cfg: DictConfig,
+        val_ds_cfg: DictConfig,
+        global_batch_size: int,
+    ):
+        train_ds = Dataset(
+            speech_featurizer=self.audio_featurizer,
+            text_featurizer=text_featurizer,
+            **OmegaConf.to_container(train_ds_cfg),
+        )
+        train_dl = train_ds.create(global_batch_size)
+        train_steps_per_epoch = train_ds.steps_per_epoch
+
+        val_ds = Dataset(
+            speech_featurizer=self.audio_featurizer,
+            text_featurizer=text_featurizer,
+            **OmegaConf.to_container(val_ds_cfg),
+        )
+        val_dl = val_ds.create(global_batch_size)
+        val_steps_per_epoch = val_ds.steps_per_epoch
+
+        return train_dl, train_steps_per_epoch, val_dl, val_steps_per_epoch
+
+    def configure_optimizer(
+        self, optim_cfg: DictConfig, mxp_enabled: bool, total_steps: int
+    ):
+        """Configure optimizer
+
+        TODO: support weight decay. the value of weight decay must be decayed too!
+            https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/AdamW
+
+        """
+        optim_cfg = OmegaConf.to_container(optim_cfg)
+
+        lr_scheduler_config = (
+            optim_cfg.pop("lr_scheduler") if "lr_scheduler" in optim_cfg else None
+        )
+
+        learning_rate = optim_cfg.pop("learning_rate")
+        if lr_scheduler_config:
+            lr = instantiate(
+                lr_scheduler_config,
+                total_steps=total_steps,
+                learning_rate=learning_rate,
+            )
+        else:
+            lr = learning_rate
+
+        optimizer_type = optim_cfg.pop("name")
+        if optimizer_type == "adam":
+            optimizer = tf.keras.optimizers.Adam(lr, **optim_cfg)
+        else:
+            raise NotImplementedError(f"{optimizer} is not yet supported.")
+
+        if mxp_enabled:
+            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+
+        return optimizer
 
     def _build(self):
         self(
@@ -103,6 +172,12 @@ class Transducer(tf.keras.Model):
         )
 
         self.summary(line_length=150)
+
+    def _fit(self):
+        super(Transducer, self).fit(**self.fit_args)
+
+    def _compile(self):
+        super(Transducer, self).compile(**self.compile_args)
 
     def call(self, inputs, training=False):
         audio_signals = inputs["audio_signals"]
@@ -125,38 +200,6 @@ class Transducer(tf.keras.Model):
         logits = self.joint([encoded_outs, decoded_outs])
 
         return {"logits": logits, "logit_lens": audio_lens}
-
-    def train(self):
-        super(Transducer, self).fit(
-            self.train_dl,
-            epochs=self.num_epochs,
-            validation_data=self.val_dl,
-            callbacks=self.callbacks,
-            steps_per_epoch=self.train_steps,
-        )
-
-    def compile(
-        self,
-        optimizer,
-        global_batch_size,
-        blank=0,
-        loss_weights=None,
-        weighted_metrics=None,
-        run_eagerly=None,
-        **kwargs,
-    ):
-        loss = TransducerLoss(blank=blank, global_batch_size=global_batch_size)
-        optimizer_with_scale = mxp.experimental.LossScaleOptimizer(
-            tf.keras.optimizers.get(optimizer), "dynamic"
-        )
-        super(Transducer, self).compile(
-            optimizer=optimizer_with_scale,
-            loss=loss,
-            loss_weights=loss_weights,
-            weighted_metrics=weighted_metrics,
-            run_eagerly=True,
-            **kwargs,
-        )
 
     def train_step(self, batch):
         x, y_true = batch

@@ -4,7 +4,7 @@ import tensorflow as tf
 class TransducerJoint(tf.keras.layers.Layer):
     def __init__(
         self,
-        vocab_size: int,
+        num_classes: int,
         dim_model: int,
         activation: str = "tanh",
         name="transducer_joint",
@@ -32,7 +32,7 @@ class TransducerJoint(tf.keras.layers.Layer):
         )
 
         self.linear_joint = tf.keras.layers.Dense(
-            vocab_size,
+            num_classes,
             name=f"{name}_joint",
         )
 

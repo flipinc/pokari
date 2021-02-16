@@ -4,7 +4,7 @@ import tensorflow as tf
 class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
         self,
-        vocab_size: int,
+        num_classes: int,
         num_layers: int,
         dim_model: int,
         embed_dim: int,
@@ -14,8 +14,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
     ):
         """
 
-        TODO: tensorflow_addons's LSTMLayerNorm is too slow. putting layernorm layer after
-            lstm layer substantially increases speed and accuracy. Why?
+        TODO: tensorflow_addons's LSTMLayerNorm is too slow. putting layernorm layer
+            after lstm layer substantially increases speed and accuracy. Why?
 
         """
         super().__init__(name=name, **kwargs)
@@ -24,7 +24,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
 
-        self.embed = tf.keras.layers.Embedding(vocab_size, embed_dim, mask_zero=True)
+        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim, mask_zero=True)
 
         self.rnns = []
         for i in range(num_layers):
