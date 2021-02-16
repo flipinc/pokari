@@ -1,10 +1,8 @@
-import io
 import math
 import os
 
 import librosa
 import numpy as np
-import soundfile as sf
 import tensorflow as tf
 import tensorflow_io as tfio
 
@@ -13,30 +11,6 @@ from augmentations import Augmentation
 BUFFER_SIZE = 100
 TFRECORD_SHARDS = 16
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-
-
-def load_and_convert_to_wav(path: str) -> tf.Tensor:
-    wave, rate = librosa.load(os.path.expanduser(path), sr=None, mono=True)
-    return tf.audio.encode_wav(tf.expand_dims(wave, axis=-1), sample_rate=rate)
-
-
-def read_raw_audio(audio, sample_rate=16000):
-    if isinstance(audio, str):
-        wave, _ = librosa.load(os.path.expanduser(audio), sr=sample_rate, mono=True)
-    elif isinstance(audio, bytes):
-        wave, sr = sf.read(io.BytesIO(audio))
-        if wave.ndim > 1:
-            wave = np.mean(wave, axis=-1)
-        wave = np.asfortranarray(wave)
-        if sr != sample_rate:
-            wave = librosa.resample(wave, sr, sample_rate)
-    elif isinstance(audio, np.ndarray):
-        if audio.ndim > 1:
-            ValueError("input audio must be single channel")
-        return audio
-    else:
-        raise ValueError("input audio must be either a path or bytes")
-    return wave
 
 
 def tf_read_raw_audio(audio: tf.Tensor, sample_rate=16000):
@@ -55,9 +29,7 @@ def get_num_batches(samples, batch_size, drop_remainders=True):
     return math.ceil(float(samples) / float(batch_size))
 
 
-class SliceDataset:
-    """ Keras Dataset for ASR using Slice """
-
+class Dataset:
     def __init__(
         self,
         stage: str,
@@ -88,11 +60,6 @@ class SliceDataset:
         )
         self.total_steps = None  # for better training visualization
 
-    # def generator(self):
-    #     for path, _, indices in self.entries:
-    #         audio = load_and_convert_to_wav(path).numpy()
-    #         yield bytes(path, "utf-8"), audio, bytes(indices, "utf-8")
-
     def create(self, batch_size: int):
         self.read_entries()
         if not self.total_steps or self.total_steps == 0:
@@ -106,9 +73,7 @@ class SliceDataset:
         for file_path in self.data_paths:
             print(f"Reading {file_path} ...")
             with tf.io.gfile.GFile(file_path, "r") as f:
-                temp_lines = f.read().splitlines()
-                # Skip the header of tsv file
-                self.entries += temp_lines
+                self.entries += f.read().splitlines()
         # The files is "\t" seperated
         self.entries = [line.split("\t", 1) for line in self.entries]
         for i, line in enumerate(self.entries):
@@ -123,7 +88,11 @@ class SliceDataset:
     @staticmethod
     def load(record: tf.Tensor):
         def fn(path: bytes):
-            return load_and_convert_to_wav(path.decode("utf-8")).numpy()
+            wave, rate = librosa.load(
+                os.path.expanduser(path.decode("utf-8")), sr=None, mono=True
+            )
+            wave = tf.audio.encode_wav(tf.expand_dims(wave, axis=-1), sample_rate=rate)
+            return wave.numpy()
 
         audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
         return record[0], audio, record[1]
@@ -176,30 +145,6 @@ class SliceDataset:
         Returns:
             path, features, input_lengths, labels, label_lengths, pred_inp
         """
-        data = self.tf_preprocess(path, audio, indices)
-
-        (
-            path,
-            features,
-            input_length,
-            label,
-            label_length,
-            prediction,
-            prediction_length,
-        ) = data
-
-        return (
-            {
-                "path": path,
-                "input": features,
-                "input_length": input_length,
-                "prediction": prediction,
-                "prediction_length": prediction_length,
-            },
-            {"label": label, "label_length": label_length},
-        )
-
-    def tf_preprocess(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
         with tf.device("/CPU:0"):
             signal = tf_read_raw_audio(audio, self.speech_featurizer.sample_rate)
 
@@ -216,12 +161,13 @@ class SliceDataset:
             features = tf.convert_to_tensor(features, tf.float32)
             input_length = tf.cast(tf.shape(features)[0], tf.int32)
 
-            return (
-                path,
-                features,
-                input_length,
-                label,
-                label_length,
-                prediction,
-                prediction_length,
-            )
+        return (
+            {
+                "path": path,
+                "input": features,
+                "input_length": input_length,
+                "prediction": prediction,
+                "prediction_length": prediction_length,
+            },
+            {"label": label, "label_length": label_length},
+        )

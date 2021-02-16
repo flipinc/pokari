@@ -14,7 +14,7 @@ def has_gpu_or_tpu():
 use_cpu = not has_gpu_or_tpu()
 
 
-class RnntLoss(tf.keras.losses.Loss):
+class TransducerLoss(tf.keras.losses.Loss):
     def __init__(
         self,
         blank=0,
@@ -22,7 +22,7 @@ class RnntLoss(tf.keras.losses.Loss):
         reduction=losses_utils.ReductionV2.NONE,
         name=None,
     ):
-        super(RnntLoss, self).__init__(reduction=reduction, name=name)
+        super(TransducerLoss, self).__init__(reduction=reduction, name=name)
         self.blank = blank
         self.global_batch_size = global_batch_size
 

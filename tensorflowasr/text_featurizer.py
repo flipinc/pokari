@@ -71,10 +71,8 @@ class SubwordFeaturizer:
         """
         self.scorer = None
         self.decoder_config = DecoderConfig(decoder_config)
-        self.blank = None
         self.tokens2indices = {}
         self.tokens = []
-        self.num_classes = None
 
         self.subwords = self.__load_subwords() if subwords is None else subwords
         self.blank = 0  # subword treats blank as 0
