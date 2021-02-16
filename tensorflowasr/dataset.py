@@ -6,27 +6,9 @@ import numpy as np
 import tensorflow as tf
 import tensorflow_io as tfio
 
-from augmentations import Augmentation
-
 BUFFER_SIZE = 100
 TFRECORD_SHARDS = 16
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-
-
-def tf_read_raw_audio(audio: tf.Tensor, sample_rate=16000):
-    wave, rate = tf.audio.decode_wav(audio, desired_channels=1, desired_samples=-1)
-    resampled = tfio.audio.resample(
-        wave, rate_in=tf.cast(rate, dtype=tf.int64), rate_out=sample_rate
-    )
-    return tf.reshape(resampled, shape=[-1])  # reshape for using tf.signal
-
-
-def get_num_batches(samples, batch_size, drop_remainders=True):
-    if samples is None or batch_size is None:
-        return None
-    if drop_remainders:
-        return math.floor(float(samples) / float(batch_size))
-    return math.ceil(float(samples) / float(batch_size))
 
 
 class Dataset:
@@ -36,7 +18,6 @@ class Dataset:
         speech_featurizer,
         text_featurizer,
         data_paths: list,
-        augmentations: Augmentation = Augmentation(None),
         cache: bool = False,
         shuffle: bool = False,
         use_tf: bool = False,
@@ -47,7 +28,6 @@ class Dataset:
         self.speech_featurizer = speech_featurizer
         self.text_featurizer = text_featurizer
         self.data_paths = data_paths
-        self.augmentations = augmentations  # apply augmentation
         self.cache = cache  # whether to cache WHOLE transformed dataset to memory
         self.shuffle = shuffle  # whether to shuffle tf.data.Dataset
         if buffer_size <= 0 and shuffle:
@@ -72,19 +52,24 @@ class Dataset:
 
     def read_entries(self):
         self.entries = []
+
         for file_path in self.data_paths:
             print(f"Reading {file_path} ...")
             with tf.io.gfile.GFile(file_path, "r") as f:
                 self.entries += f.read().splitlines()
-        # The files is "\t" seperated
+
         self.entries = [line.split("\t", 1) for line in self.entries]
+
         for i, line in enumerate(self.entries):
             self.entries[i][-1] = " ".join(
                 [str(x) for x in self.text_featurizer.extract(line[-1]).numpy()]
             )
+
         self.entries = np.array(self.entries)
+
         if self.shuffle:
             np.random.shuffle(self.entries)  # Mix transcripts.tsv
+
         self.total_steps = len(self.entries)
 
     @staticmethod
@@ -97,6 +82,7 @@ class Dataset:
             return wave.numpy()
 
         audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
+
         return record[0], audio, record[1]
 
     def process(self, dataset, batch_size):
@@ -136,24 +122,29 @@ class Dataset:
         )
 
         dataset = dataset.prefetch(AUTOTUNE)
-        self.total_steps = get_num_batches(
-            self.total_steps, batch_size, drop_remainders=self.drop_remainder
-        )
+
+        if self.drop_remainder:
+            self.total_steps = math.floor(float(len(dataset)) / float(batch_size))
+        else:
+            self.total_steps = math.ceil(float(len(dataset)) / float(batch_size))
+
         return dataset
 
     @tf.function
     def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
+        def tf_read_raw_audio(audio: tf.Tensor, sample_rate=16000):
+            wave, rate = tf.audio.decode_wav(
+                audio, desired_channels=1, desired_samples=-1
+            )
+            resampled = tfio.audio.resample(
+                wave, rate_in=tf.cast(rate, dtype=tf.int64), rate_out=sample_rate
+            )
+            return tf.reshape(resampled, shape=[-1])  # reshape for using tf.signal
+
         with tf.device("/CPU:0"):
             audio_signal = tf_read_raw_audio(audio, self.speech_featurizer.sample_rate)
-            # audio_signal = tf.convert_to_tensor(audio_signal, tf.float32)
 
             audio_len = tf.cast(tf.shape(audio_signal)[0], tf.int32)
-
-            # signal = self.augmentations.before.augment(signal)
-
-            # features = self.speech_featurizer.tf_extract(signal)
-
-            # features = self.augmentations.after.augment(features)
 
             label = tf.strings.to_number(tf.strings.split(indices), out_type=tf.int32)
             label_len = tf.cast(tf.shape(label)[0], tf.int32)

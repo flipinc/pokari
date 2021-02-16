@@ -8,7 +8,7 @@ from spec_augment import SpectrogramAugmentation
 from transducer_joint import TransducerJoint
 from transducer_loss import TransducerLoss
 from transducer_predictor import TransducerPredictor
-from utils import get_reduced_length, pad_prediction_tfarray
+from utils import pad_prediction_tfarray
 
 Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
 
@@ -87,6 +87,7 @@ class Transducer(tf.keras.Model):
                 "targets": targets,
                 "target_lens": target_lens,
             },
+            training=True,
         )
 
     def call(self, inputs, training=False):
@@ -95,24 +96,21 @@ class Transducer(tf.keras.Model):
         targets = inputs["targets"]
         target_lens = inputs["target_lens"]
 
+        # [B, T, n_mels]
         audio_features, audio_lens = self.audio_featurizer.tf_extract(
             audio_signals, audio_lens
         )
 
+        # [B, T, n_mels]
         if training:
-            audio_features = tf.squeeze(audio_features, axis=-1)
             audio_features = self.spec_augment(audio_features)
-            audio_features = tf.expand_dims(audio_features, axis=-1)
 
-        encoded_outs = self.encoder(audio_features)
-        decoded_outs = self.predictor([targets, target_lens])
+        encoded_outs, audio_lens = self.encoder(audio_features, audio_lens)
+        decoded_outs = self.predictor(targets, target_lens)
 
         logits = self.joint([encoded_outs, decoded_outs])
 
-        return {
-            "logits": logits,
-            "logit_lens": get_reduced_length(audio_lens, self.time_reduction_factor),
-        }
+        return {"logits": logits, "logit_lens": audio_lens}
 
     def compile(
         self,
@@ -147,6 +145,7 @@ class Transducer(tf.keras.Model):
                     "targets": x["targets"],
                     "target_lens": x["target_lens"],
                 },
+                training=True,
             )
             loss = self.loss(y_true, y_pred)
             scaled_loss = self.optimizer.get_scaled_loss(loss)
@@ -164,6 +163,7 @@ class Transducer(tf.keras.Model):
                 "targets": x["targets"],
                 "target_lens": x["target_lens"],
             },
+            training=False,
         )
         loss = self.loss(y_true, y_pred)
         return {"val_loss": loss}
