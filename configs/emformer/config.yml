@@ -1,18 +1,18 @@
 speech_config:
   sample_rate: 16000
-  frame_ms: 25
-  stride_ms: 10
-  num_feature_bins: 80
-  feature_type: log_mel_spectrogram
-  preemphasis: 0.97
-  normalize_signal: true
-  normalize_feature: true
-  normalize_per_feature: false
+  # frame_ms: 25
+  # stride_ms: 10
+  # num_feature_bins: 80
+  # feature_type: log_mel_spectrogram
+  # preemphasis: 0.97
+  # normalize_signal: true
+  # normalize_feature: true
+  # normalize_per_feature: false
 
 decoder_config:
   vocabulary: null
-  target_vocab_size: 1024
-  max_subword_length: 4
+  target_vocab_size: 1024 # 16,384
+  max_subword_length: 4 # 40
   blank_at_zero: true
   beam_width: 5
   norm_score: true
@@ -74,7 +74,7 @@ learning_config:
       learning_rate: 0.0001
 
   running_config:
-    batch_size: 2
+    batch_size: 4
     num_epochs: 20
     checkpoint:
       filepath: outputs/tensorflow_asr/checkpoints/{epoch:02d}.h5

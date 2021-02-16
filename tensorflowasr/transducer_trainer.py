@@ -5,10 +5,10 @@ import tensorflow as tf
 from hydra.experimental import compose, initialize
 from omegaconf import OmegaConf
 
-from model import StreamingTransducer
-from slice_dataset import SliceDataset
-from speech import SpeechFeaturizer
-from text import SubwordFeaturizer
+from audio_featurizer import AudioFeaturizer
+from dataset import Dataset
+from text_featurizer import SubwordFeaturizer
+from transducer import Transducer
 
 warnings.simplefilter("ignore")
 tf.get_logger().setLevel("ERROR")
@@ -28,7 +28,7 @@ if gpus:
 
 strategy = tf.distribute.MirroredStrategy()
 
-speech_featurizer = SpeechFeaturizer(OmegaConf.to_container(args.speech_config))
+speech_featurizer = AudioFeaturizer(**OmegaConf.to_container(args.speech_config))
 
 if args.subwords and os.path.exists(args.subwords):
     print("Loading subwords ...")
@@ -44,14 +44,13 @@ else:
     )
     text_featurizer.save_to_file(args.subwords)
 
-
-train_dataset = SliceDataset(
+train_dataset = Dataset(
     speech_featurizer=speech_featurizer,
     text_featurizer=text_featurizer,
     **OmegaConf.to_container(args.learning_config.train_dataset_config)
 )
 
-eval_dataset = SliceDataset(
+eval_dataset = Dataset(
     speech_featurizer=speech_featurizer,
     text_featurizer=text_featurizer,
     **OmegaConf.to_container(args.learning_config.eval_dataset_config)
@@ -60,19 +59,19 @@ eval_dataset = SliceDataset(
 with strategy.scope():
     global_batch_size = args.learning_config.running_config.batch_size
     global_batch_size *= strategy.num_replicas_in_sync
-    # build model
-    streaming_transducer = StreamingTransducer(
+
+    transducer = Transducer(
         **OmegaConf.to_container(args.model_config),
-        vocabulary_size=text_featurizer.num_classes
+        vocab_size=text_featurizer.num_classes
     )
-    streaming_transducer._build(speech_featurizer.shape)
-    # streaming_transducer.summary(line_length=150)
+    transducer._build(speech_featurizer.shape)
+    transducer.summary(line_length=150)
 
     optimizer = tf.keras.optimizers.get(
         OmegaConf.to_container(args.learning_config.optimizer_config)
     )
 
-    streaming_transducer.compile(
+    transducer.compile(
         optimizer=optimizer,
         global_batch_size=global_batch_size,
         blank=text_featurizer.blank,
@@ -93,7 +92,7 @@ with strategy.scope():
         ),
     ]
 
-    streaming_transducer.fit(
+    transducer.fit(
         train_data_loader,
         epochs=args.learning_config.running_config.num_epochs,
         validation_data=eval_data_loader,
