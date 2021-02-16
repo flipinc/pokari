@@ -38,13 +38,13 @@ class Dataset:
         self.drop_remainder = (
             drop_remainder  # whether to drop remainder for multi gpu training
         )
-        self.total_steps = None  # for better training visualization
+        self.steps_per_epoch = None  # for better training visualization
 
         self.num_print_sample_data = 2
 
     def create(self, batch_size: int):
         self.read_entries()
-        if not self.total_steps or self.total_steps == 0:
+        if not self.steps_per_epoch or self.steps_per_epoch == 0:
             return None
         dataset = tf.data.Dataset.from_tensor_slices(self.entries)
         dataset = dataset.map(self.load, num_parallel_calls=AUTOTUNE)
@@ -70,7 +70,7 @@ class Dataset:
         if self.shuffle:
             np.random.shuffle(self.entries)  # Mix transcripts.tsv
 
-        self.total_steps = len(self.entries)
+        self.steps_per_epoch = len(self.entries)
 
     @staticmethod
     def load(record: tf.Tensor):
@@ -124,9 +124,9 @@ class Dataset:
         dataset = dataset.prefetch(AUTOTUNE)
 
         if self.drop_remainder:
-            self.total_steps = math.floor(float(len(dataset)) / float(batch_size))
+            self.steps_per_epoch = math.floor(float(len(dataset)) / float(batch_size))
         else:
-            self.total_steps = math.ceil(float(len(dataset)) / float(batch_size))
+            self.steps_per_epoch = math.ceil(float(len(dataset)) / float(batch_size))
 
         return dataset
 
