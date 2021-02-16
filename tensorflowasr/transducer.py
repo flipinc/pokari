@@ -30,19 +30,19 @@ class Transducer(tf.keras.Model):
             **OmegaConf.to_container(cfgs.spec_augment)
         )
 
-        if cfgs.subwords and os.path.exists(cfgs.subwords):
+        if cfgs.text_feature.subwords and os.path.exists(cfgs.text_feature.subwords):
             print("Loading subwords ...")
             text_featurizer = SubwordFeaturizer.load_from_file(
-                OmegaConf.to_container(cfgs.decoder_config),
-                cfgs.subwords,
+                OmegaConf.to_container(cfgs.text_feature),
+                cfgs.text_feature.subwords,
             )
         else:
             print("Generating subwords ...")
             text_featurizer = SubwordFeaturizer.build_from_corpus(
-                OmegaConf.to_container(cfgs.decoder_config),
-                cfgs.subwords_corpus,
+                OmegaConf.to_container(cfgs.text_feature),
+                cfgs.text_feature.subwords_corpus,
             )
-            text_featurizer.save_to_file(cfgs.subwords)
+            text_featurizer.save_to_file(cfgs.text_feature.subwords)
 
         self.encoder = instantiate(cfgs.encoder)
         self.predictor = instantiate(
@@ -83,9 +83,9 @@ class Transducer(tf.keras.Model):
             "steps_per_epoch": train_steps_per_epoch,
             "validation_steps": val_steps_per_epoch,
             "epochs": cfgs.trainer.epochs,
-            # "workers": 4,
-            # "max_queue_size": 10,
-            # "use_multiprocessing": True,
+            "workers": cfgs.trainer.workers,
+            "max_queue_size": cfgs.trainer.max_queue_size,
+            "use_multiprocessing": cfgs.trainer.use_multiprocessing,
             "callbacks": [
                 tf.keras.callbacks.ModelCheckpoint(
                     **OmegaConf.to_container(cfgs.trainer.checkpoint)
@@ -107,7 +107,7 @@ class Transducer(tf.keras.Model):
         global_batch_size: int,
     ):
         train_ds = Dataset(
-            speech_featurizer=self.audio_featurizer,
+            audio_featurizer=self.audio_featurizer,
             text_featurizer=text_featurizer,
             **OmegaConf.to_container(train_ds_cfg),
         )
@@ -115,7 +115,7 @@ class Transducer(tf.keras.Model):
         train_steps_per_epoch = train_ds.steps_per_epoch
 
         val_ds = Dataset(
-            speech_featurizer=self.audio_featurizer,
+            audio_featurizer=self.audio_featurizer,
             text_featurizer=text_featurizer,
             **OmegaConf.to_container(val_ds_cfg),
         )

@@ -5,8 +5,8 @@ from transducer import Transducer
 
 tf.keras.backend.clear_session()
 
-initialize(config_path="../configs/emformer", job_name="emformer")
-cfgs = compose(config_name="config.yml")
+initialize(config_path="../configs/emformer", job_name="rnnt")
+cfgs = compose(config_name="librispeech_wordpiece.yml")
 
 tf.config.optimizer.set_experimental_options({"auto_mixed_precision": cfgs.trainer.mxp})
 
@@ -22,6 +22,6 @@ with strategy.scope():
     global_batch_size *= strategy.num_replicas_in_sync
 
     transducer = Transducer(cfgs=cfgs, global_batch_size=global_batch_size)
-    transducer._build()
+    # transducer._build()
     transducer._compile()
     transducer._fit()

@@ -1,29 +1,12 @@
-encoder:
-  _target_: rnnt_encoder.RNNTEncoder
-  dim_model: 320
-  num_units: 1024
-  num_layers: 8
-  reduction_indices: [0, 1]
-  reduction_factors: [3, 2]
-
-predictor:
-  _target_: transducer_predictor.TransducerPredictor
-  num_layers: 2
-  embed_dim: 320
-  dim_model: 1024
-  random_state_sampling: true
-
-joint:
-  _target_: transducer_joint.TransducerJoint
-  dim_model: 320
-  activation: tanh
-
 trainer:
   devices: [0]
   mxp: true
   run_eagerly: true
   batch_size: 4
   epochs: 20
+  workers: 8
+  max_queue_size: 8 # TODO: what is the optimal value? batch size * n?
+  use_multiprocessing: true
   checkpoint:
     filepath: outputs/tensorflow_asr/checkpoints/{epoch:02d}.h5
     save_best_only: true
@@ -46,17 +29,16 @@ spec_augment:
 
 train_ds:
   stage: train
-  use_tf: true
   data_paths:
     - /workspace/datasets/tensorflow_asr.tsv
   shuffle: true
   cache: true
   buffer_size: 100
   drop_remainder: true
+  num_print_sample_data: 1
 
 validation_ds:
   stage: val
-  use_tf: true
   data_paths:
     - /workspace/datasets/tensorflow_asr_val.tsv
   shuffle: false
@@ -73,13 +55,16 @@ audio_feature:
   dither: 1e-5
   pad_to: 8
 
-decoder_config:
+text_feature:
   vocabulary: null
   target_vocab_size: 1024 # 16,384
-  max_subword_length: 4 # 40
+  max_subword_length: 4 # 20
   blank_at_zero: true
   beam_width: 5
   norm_score: true
+  subwords: /workspace/datasets/subwords.subwords # Path to file that stores generated subwords
+  subwords_corpus: # Transcript files for generating subwords
+    - /workspace/datasets/tensorflow_asr.tsv
 
 optimizer:
   name: adam
@@ -95,8 +80,29 @@ optimizer:
   #   warmup_ratio: 0.05
   #   warmup_learning_rate: 1e-6
 
+encoder:
+  _target_: emformer_encoder.EmformerEncoder
+  feat_in: *n_mels
+  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_heads: 8
+  dim_model: 512
+  dim_ffn: 2048
+  dropout_attn: 0.1
+  subsampling: vgg # frame stacking in paper
+  subsampling_factor: 4
+  subsampling_dim: 256 
+  left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
+  chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
+  right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
 
- 
-subwords: /workspace/datasets/subwords.subwords # Path to file that stores generated subwords
-subwords_corpus: # Transcript files for generating subwords
-  - /workspace/datasets/tensorflow_asr.tsv
+predictor:
+  _target_: transducer_predictor.TransducerPredictor
+  num_layers: 1 # 2 in paper
+  embed_dim: 320 # 256 in paper
+  dim_model: 320 # 512 in paper
+  random_state_sampling: true
+
+joint:
+  _target_: transducer_joint.TransducerJoint
+  dim_model: 320 # 640 in paper
+  activation: tanh
