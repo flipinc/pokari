@@ -111,34 +111,32 @@ class EmformerEncoder(tf.keras.layers.Layer):
         Returns:
             tf.int32: punched out mask
 
+        TODO: there is another way to implement this. Instead of scatter_nd,
+        sandwitch zero-tensor on one-tensor.
+
         """
-        row_index = tf.range(left, right, dtype=tf.int32)
-
-        # row_index = tf.expand_dims(row_index, axis=0)
-        # row_index = tf.unstack(row_index, axis=-1)  # [[0], [1], ...]
-
-        row_index = tf.split(
-            row_index,
-            num_or_size_splits=tf.ones((right - left), dtype=tf.int32),
-            axis=0,
-        )
+        row_indices = tf.TensorArray(tf.int32, size=right - left, clear_after_read=True)
+        counter = tf.constant(0, tf.int32)
+        for i in tf.range(left, right):
+            row_indices = row_indices.write(counter, tf.expand_dims(i, axis=0))
+            counter += tf.constant(1, tf.int32)
+        row_indices = row_indices.stack()
 
         value = tf.ones([right - left], tf.int32)
 
-        row = tf.scatter_nd(
-            row_index,
-            value,
-            [width],
-        )
+        row = tf.scatter_nd(row_indices, value, [width])
         row = tf.expand_dims(row, axis=0)  # [1, width]
 
         belt = tf.tile(row, [bottom - top, 1])  # [bottom - top, width]
 
-        column_index = tf.range(top, bottom, dtype=tf.int32)
-        column_index = tf.expand_dims(column_index, axis=0)
-        column_index = tf.unstack(column_index, axis=-1)
+        col_indices = tf.TensorArray(tf.int32, size=bottom - top, clear_after_read=True)
+        counter = tf.constant(0, tf.int32)
+        for i in tf.range(top, bottom):
+            col_indices = col_indices.write(counter, tf.expand_dims(i, axis=0))
+            counter += tf.constant(1, tf.int32)
+        col_indices = col_indices.stack()
 
-        target = tf.scatter_nd(column_index, belt, [height, width])
+        target = tf.scatter_nd(col_indices, belt, [height, width])
         target = tf.expand_dims(target, axis=0)  # [1, height, width]
 
         targets = tf.tile(target, [bs, 1, 1])
@@ -198,7 +196,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
         )
         mask_right = tf.zeros([bs, upperbound_right_length, t_max], tf.int32)
 
-        right_indexes = tf.constant([], tf.int32)
+        # right_indexes = tf.constant([], tf.int32)
+        right_indexes = tf.TensorArray(
+            tf.int32, size=0, dynamic_size=True, clear_after_read=True
+        )
         for i in tf.range(num_chunks):
             # 1. mark diagnal and left chunks
             left_offset = (
@@ -240,43 +241,36 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 width=upperbound_right_length,
                 top=start_offset,
                 bottom=start_offset + self.chunk_length,
-                left=len(right_indexes),
-                right=len(right_indexes) + this_right_length,
+                left=right_indexes.size(),
+                right=right_indexes.size() + this_right_length,
             )
 
             mask_diagnal += self.punch_out_ones(
                 bs,
                 height=upperbound_right_length,
                 width=upperbound_right_length,
-                top=len(right_indexes),
-                bottom=len(right_indexes) + this_right_length,
-                left=len(right_indexes),
-                right=len(right_indexes) + this_right_length,
+                top=right_indexes.size(),
+                bottom=right_indexes.size() + this_right_length,
+                left=right_indexes.size(),
+                right=right_indexes.size() + this_right_length,
             )
 
             mask_right += self.punch_out_ones(
                 bs,
                 height=upperbound_right_length,
                 width=t_max,
-                top=len(right_indexes),
-                bottom=len(right_indexes) + this_right_length,
+                top=right_indexes.size(),
+                bottom=right_indexes.size() + this_right_length,
                 left=left_offset,
                 right=end_offset,
             )
 
-            right_indexes = tf.cast(
-                tf.concat(
-                    [
-                        right_indexes,
-                        tf.range(
-                            end_offset, end_offset + this_right_length, dtype=tf.int32
-                        ),
-                    ],
-                    axis=0,
-                ),
-                tf.int32,
-            )
+            for offset in tf.range(
+                end_offset, end_offset + this_right_length, dtype=tf.int32
+            ):
+                right_indexes = right_indexes.write(right_indexes.size(), offset)
 
+        right_indexes = right_indexes.stack()
         right_size = tf.shape(right_indexes)[0]
 
         # 3. remove unused right contexts
