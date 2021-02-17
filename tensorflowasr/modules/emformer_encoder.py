@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import tensorflow as tf
 
-from subsample import StackSubsample, VggSubsample
+from modules.subsample import StackSubsample, VggSubsample
 
 
 class EmformerEncoder(tf.keras.layers.Layer):

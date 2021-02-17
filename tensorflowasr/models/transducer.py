@@ -2,18 +2,17 @@ import collections
 import os
 
 import tensorflow as tf
+from datasets.dataset import Dataset
+from frontends.audio_featurizer import AudioFeaturizer
+from frontends.spec_augment import SpectrogramAugmentation
+from frontends.text_featurizer import SubwordFeaturizer
 from hydra.utils import instantiate
+from losses.transducer_loss import TransducerLoss
+from metrics.error_rate import ErrorRate
+from modules.inference import Inference
+from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
-
-from audio_featurizer import AudioFeaturizer
-from dataset import Dataset
-from error_rate import ErrorRate
-from inference import Inference
-from spec_augment import SpectrogramAugmentation
-from text_featurizer import SubwordFeaturizer
-from transducer_decoder import TransducerDecoder
-from transducer_loss import TransducerLoss
-from utils import pad_prediction_tfarray
+from utils.utils import pad_prediction_tfarray
 
 Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
 

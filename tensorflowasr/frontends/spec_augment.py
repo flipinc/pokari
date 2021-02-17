@@ -1,6 +1,5 @@
 import tensorflow as tf
-
-from utils import shape_list
+from utils.utils import shape_list
 
 
 class SpectrogramAugmentation:
