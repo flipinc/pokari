@@ -24,7 +24,7 @@ tflite_model = converter.convert()
 
 print("🎉 Successfully converted to tflite model")
 
-tflite_path = "models/tflite"
+tflite_path = "models/tflite.tflite"
 
 if not os.path.exists(os.path.dirname(tflite_path)):
     os.makedirs(os.path.dirname(tflite_path))
