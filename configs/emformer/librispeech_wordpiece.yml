@@ -68,17 +68,14 @@ text_feature:
 
 optimizer:
   name: adam
-  # learning_rate: 0.0005
+  learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
-
-  # for quick debugging
-  learning_rate: 0.0001
  
-  # lr_scheduler:
-  #   _target_: lr_scheduler.WarmupCosineAnnealing
-  #   warmup_ratio: 0.05
-  #   warmup_learning_rate: 1e-6
+  lr_scheduler:
+    _target_: lr_scheduler.WarmupCosineAnnealing
+    warmup_ratio: 0.05
+    warmup_learning_rate: 1e-6
 
 encoder:
   _target_: emformer_encoder.EmformerEncoder
@@ -88,7 +85,7 @@ encoder:
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
-  subsampling: vgg # frame stacking in paper
+  subsampling: stack # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 256
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)

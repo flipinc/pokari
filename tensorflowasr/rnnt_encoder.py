@@ -57,7 +57,7 @@ class RNNTEncoder(tf.keras.layers.Layer):
             )
         return tf.stack(states, axis=0)
 
-    def call(self, x, audio_lens, training=False, **kwargs):
+    def call(self, x, audio_lens, training=False):
         """
 
         Args:
@@ -71,11 +71,11 @@ class RNNTEncoder(tf.keras.layers.Layer):
         audio_lens = get_reduced_length(audio_lens, self.time_reduction_factor)
 
         for block in self.blocks:
-            x = block(x, audio_lens, training=training, **kwargs)
+            x = block(x, training=training)
 
         return x, audio_lens
 
-    def recognize(self, inputs, states):
+    def recognize(self, x, states):
         """Recognize function for encoder network
 
         Args:
@@ -86,14 +86,12 @@ class RNNTEncoder(tf.keras.layers.Layer):
             tf.Tensor: outputs with shape [1, T, E]
             tf.Tensor: new states with shape [num_lstms, 1 or 2, 1, P]
         """
-        outputs = self.reshape(inputs)
         new_states = []
-        for i, block in enumerate(self.blocks):
-            outputs, block_states = block.recognize(
-                outputs, states=tf.unstack(states[i], axis=0)
-            )
-            new_states.append(block_states)
-        return outputs, tf.stack(new_states, axis=0)
+        for idx, block in enumerate(self.blocks):
+            x, new_state = block.recognize(x, states=tf.unstack(states[idx], axis=0))
+            new_states.append(new_state)
+
+        return x, tf.stack(new_states, axis=0)
 
     def get_config(self):
         conf = self.reshape.get_config()
@@ -132,7 +130,7 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
             name=f"{self.name}_projection",
         )
 
-    def call(self, x, x_len, training=False, **kwargs):
+    def call(self, x, training=False, **kwargs):
         if self.reduction is not None:
             x = self.reduction(x)
         (x, _, _) = self.rnn(x)
@@ -143,13 +141,10 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
     def recognize(self, x, states):
         if self.reduction is not None:
             x = self.reduction(x)
-        x = self.rnn(x, training=False, initial_state=states)
-        new_states = tf.stack(x[1:], axis=0)
-        x = x[0]
-        if self.ln is not None:
-            x = self.ln(x, training=False)
+        (x, h, c) = self.rnn(x, training=False, initial_state=states)
+        x = self.ln(x, training=False)
         x = self.projection(x, training=False)
-        return x, new_states
+        return x, tf.stack([h, c], axis=0)
 
     def get_config(self):
         conf = {}

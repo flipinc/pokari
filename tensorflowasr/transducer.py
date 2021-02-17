@@ -7,8 +7,11 @@ from omegaconf import DictConfig, OmegaConf
 
 from audio_featurizer import AudioFeaturizer
 from dataset import Dataset
+from error_rate import ErrorRate
+from inference import Inference
 from spec_augment import SpectrogramAugmentation
 from text_featurizer import SubwordFeaturizer
+from transducer_decoder import TransducerDecoder
 from transducer_loss import TransducerLoss
 from utils import pad_prediction_tfarray
 
@@ -32,23 +35,27 @@ class Transducer(tf.keras.Model):
 
         if cfgs.text_feature.subwords and os.path.exists(cfgs.text_feature.subwords):
             print("Loading subwords ...")
-            text_featurizer = SubwordFeaturizer.load_from_file(
+            self.text_featurizer = SubwordFeaturizer.load_from_file(
                 OmegaConf.to_container(cfgs.text_feature),
                 cfgs.text_feature.subwords,
             )
         else:
             print("Generating subwords ...")
-            text_featurizer = SubwordFeaturizer.build_from_corpus(
+            self.text_featurizer = SubwordFeaturizer.build_from_corpus(
                 OmegaConf.to_container(cfgs.text_feature),
                 cfgs.text_feature.subwords_corpus,
             )
-            text_featurizer.save_to_file(cfgs.text_feature.subwords)
+            self.text_featurizer.save_to_file(cfgs.text_feature.subwords)
 
         self.encoder = instantiate(cfgs.encoder)
         self.predictor = instantiate(
-            cfgs.predictor, num_classes=text_featurizer.num_classes
+            cfgs.predictor,
+            batch_size=global_batch_size,
+            num_classes=self.text_featurizer.num_classes,
         )
-        self.joint = instantiate(cfgs.joint, num_classes=text_featurizer.num_classes)
+        self.joint = instantiate(
+            cfgs.joint, num_classes=self.text_featurizer.num_classes
+        )
 
         (
             train_dl,
@@ -56,7 +63,7 @@ class Transducer(tf.keras.Model):
             val_dl,
             val_steps_per_epoch,
         ) = self.configure_datasets(
-            text_featurizer, cfgs.train_ds, cfgs.validation_ds, global_batch_size
+            cfgs.train_ds, cfgs.validation_ds, global_batch_size
         )
 
         optimizer = self.configure_optimizer(
@@ -66,8 +73,14 @@ class Transducer(tf.keras.Model):
         )
 
         loss = TransducerLoss(
-            blank=text_featurizer.blank, global_batch_size=global_batch_size
+            blank=self.text_featurizer.blank, global_batch_size=global_batch_size
         )
+
+        self.inference = Inference(predictor=self.predictor, joint=self.joint)
+        self.decoder = TransducerDecoder(labels=[], inference=self.inference)
+
+        self.wer = ErrorRate(kind="wer")
+        self.cer = ErrorRate(kind="cer")
 
         self.compile_args = {
             "optimizer": optimizer,
@@ -99,14 +112,13 @@ class Transducer(tf.keras.Model):
 
     def configure_datasets(
         self,
-        text_featurizer,
         train_ds_cfg: DictConfig,
         val_ds_cfg: DictConfig,
         global_batch_size: int,
     ):
         train_ds = Dataset(
             audio_featurizer=self.audio_featurizer,
-            text_featurizer=text_featurizer,
+            text_featurizer=self.text_featurizer,
             **OmegaConf.to_container(train_ds_cfg),
         )
         train_dl = train_ds.create(global_batch_size)
@@ -114,7 +126,7 @@ class Transducer(tf.keras.Model):
 
         val_ds = Dataset(
             audio_featurizer=self.audio_featurizer,
-            text_featurizer=text_featurizer,
+            text_featurizer=self.text_featurizer,
             **OmegaConf.to_container(val_ds_cfg),
         )
         val_dl = val_ds.create(global_batch_size)
@@ -219,7 +231,7 @@ class Transducer(tf.keras.Model):
         gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
-        return {"train_loss": loss}
+        return {"train_loss": loss, "lr": self.optimizer.lr}
 
     def test_step(self, batch):
         x, y_true = batch
@@ -237,7 +249,7 @@ class Transducer(tf.keras.Model):
 
         return {"val_loss": loss}
 
-    def encoder_inference(self, features: tf.Tensor, states: tf.Tensor):
+    def encoder_inference(self, audio_features: tf.Tensor, states: tf.Tensor):
         """Infer function for encoder (or encoders)
 
         Args:
@@ -250,17 +262,16 @@ class Transducer(tf.keras.Model):
             tf.Tensor: states of encoders with shape [num_rnns, 1 or 2, 1, P]
         """
         with tf.name_scope(f"{self.name}_encoder"):
-            outputs = tf.expand_dims(features, axis=0)
-            outputs, new_states = self.encoder.recognize(outputs, states)
-            return tf.squeeze(outputs, axis=0), new_states
+            outputs, states = self.encoder.recognize(audio_features, states)
+            return tf.squeeze(outputs, axis=0), states
 
     def decoder_inference(
-        self, encoded: tf.Tensor, predicted: tf.Tensor, states: tf.Tensor
+        self, encoded_outs: tf.Tensor, predicted: tf.Tensor, states: tf.Tensor
     ):
         """Infer function for decoder
 
         Args:
-            encoded (tf.Tensor): output of encoder at each time step => shape [E]
+            encoded_outs (tf.Tensor): output of encoder at each time step => shape [E]
             predicted (tf.Tensor): last character index of predicted sequence =>
                 shape []
             states (nested lists of tf.Tensor): states returned by rnn layers
@@ -269,13 +280,13 @@ class Transducer(tf.keras.Model):
             (ytu, new_states)
         """
         with tf.name_scope(f"{self.name}_decoder"):
-            encoded = tf.reshape(encoded, [1, 1, -1])  # [E] => [1, 1, E]
+            encoded_outs = tf.reshape(encoded_outs, [1, 1, -1])  # [E] => [1, 1, E]
             predicted = tf.reshape(predicted, [1, 1])  # [] => [1, 1]
             y, new_states = self.predictor.recognize(
                 predicted, states
             )  # [1, 1, P], states
             ytu = tf.nn.log_softmax(
-                self.joint([encoded, y], training=False)
+                self.joint([encoded_outs, y], training=False)
             )  # [1, 1, V]
             ytu = tf.reshape(ytu, shape=[-1])  # [1, 1, V] => [V]
             return ytu, new_states
@@ -306,31 +317,20 @@ class Transducer(tf.keras.Model):
             swap_memory=swap_memory,
         )
 
-    def recognize_tflite(self, signal, predicted, encoder_states, prediction_states):
-        """
-        Function to convert to tflite using greedy decoding (default streaming mode)
-        Args:
-            signal: tf.Tensor with shape [None] indicating a single audio signal
-            predicted: last predicted character with shape []
-            encoder_states: lastest encoder states with shape [num_rnns, 1 or 2, 1, P]
-            prediction_states: lastest prediction states with shape
-                [num_rnns, 1 or 2, 1, P]
-
-        Return:
-            transcript: tf.Tensor of Unicode Code Points with shape [None] and dtype
-                tf.int32
-            predicted: last predicted character with shape []
-            encoder_states: lastest encoder states with shape [num_rnns, 1 or 2, 1, P]
-            prediction_states: lastest prediction states with shape
-                [num_rnns, 1 or 2, 1, P]
-        """
-        features = self.speech_featurizer.tf_extract(signal)
-        encoded, new_encoder_states = self.encoder_inference(features, encoder_states)
+    def recognize_tflite(
+        self, audio_signals, predicted, cache_encoder_states, cache_predictor_states
+    ):
+        audio_signals = tf.expand_dims(audio_signals, axis=0)  # add batch dim
+        audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
+        audio_features, _ = self.audio_featurizer.tf_extract(audio_signals, audio_lens)
+        encoded_outs, cache_encoder_states = self.encoder_inference(
+            audio_features, cache_encoder_states
+        )
         hypothesis = self._perform_greedy(
-            encoded, tf.shape(encoded)[0], predicted, prediction_states
+            encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
         )
         transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
-        return transcript, hypothesis.index, new_encoder_states, hypothesis.states
+        return transcript, hypothesis.index, cache_encoder_states, hypothesis.states
 
     def _perform_greedy_batch(
         self,
@@ -413,7 +413,7 @@ class Transducer(tf.keras.Model):
             def body(_time, _hypothesis):
                 ytu, _states = self.decoder_inference(
                     # avoid using [index] in tflite
-                    encoded=tf.gather_nd(encoded, tf.reshape(_time, shape=[1])),
+                    encoded_outs=tf.gather_nd(encoded, tf.reshape(_time, shape=[1])),
                     predicted=_hypothesis.index,
                     states=_hypothesis.states,
                 )

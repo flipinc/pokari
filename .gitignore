@@ -6,7 +6,7 @@ __pycache__
 
 # tensorflow related
 outputs
-checkpoints
+models
 
 # sphinx related
 docs/_build/doctrees

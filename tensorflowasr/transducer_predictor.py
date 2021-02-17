@@ -4,6 +4,7 @@ import tensorflow as tf
 class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
         self,
+        batch_size: int,
         num_classes: int,
         num_layers: int,
         dim_model: int,
@@ -20,6 +21,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         """
         super().__init__(name=name, **kwargs)
 
+        self.batch_size = batch_size
         self.num_layers = num_layers
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
@@ -37,7 +39,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
             ln = tf.keras.layers.LayerNormalization(name=f"{name}_ln_{i}")
             self.rnns.append({"rnn": rnn, "ln": ln})
 
-    def get_initial_state(self, batch_size: int, training: bool = True):
+    def get_initial_state(self, training: bool = False):
         """
 
         N: number of predictor network layers
@@ -46,7 +48,6 @@ class TransducerPredictor(tf.keras.layers.Layer):
             [N, 2, B, D]
 
         """
-        b = batch_size
         states = tf.TensorArray(
             size=self.num_layers, dtype=self.dtype, clear_after_read=True
         )
@@ -54,11 +55,11 @@ class TransducerPredictor(tf.keras.layers.Layer):
         if self.random_state_sampling and training:
             for idx in range(self.num_layers):
                 h = tf.random.normal(
-                    (b, self.dim_model),
+                    (self.batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 c = tf.random.normal(
-                    (b, self.dim_model),
+                    (self.batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
@@ -67,11 +68,11 @@ class TransducerPredictor(tf.keras.layers.Layer):
         else:
             for idx in range(self.num_layers):
                 h = tf.zeros(
-                    (b, self.dim_model),
+                    (self.batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 c = tf.zeros(
-                    (b, self.dim_model),
+                    (self.batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
@@ -87,11 +88,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
             target_lens: [B]
 
         """
-        bs = tf.shape(targets)[0]
-
         x = self.embed(targets)
-        states = self.get_initial_state(bs, training)
-        # targets, _ = self.rnn(targets, target_lens, states)
+        states = self.get_initial_state(training)
 
         for idx, rnn in enumerate(self.rnns):
             mask = tf.sequence_mask(target_lens)
@@ -105,28 +103,25 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         return x
 
-    def recognize(self, inputs, states):
+    def recognize(self, x, states):
         """Recognize function for prediction network
 
         Args:
-            inputs (tf.Tensor): shape [1, 1]
+            x (tf.Tensor): shape [1, 1]
             states (tf.Tensor): shape [num_lstms, 2, B, P]
 
         Returns:
             tf.Tensor: outputs with shape [1, 1, P]
             tf.Tensor: new states with shape [num_lstms, 2, 1, P]
         """
-        outputs = self.embed(inputs, training=False)
-        outputs = self.do(outputs, training=False)
+        x = self.embed(x, training=False)
+
         new_states = []
-        for i, rnn in enumerate(self.rnns):
-            outputs = rnn["rnn"](
-                outputs, training=False, initial_state=tf.unstack(states[i], axis=0)
+        for idx, rnn in enumerate(self.rnns):
+            (x, h, c) = rnn["rnn"](
+                x, training=False, initial_state=tf.unstack(states[idx], axis=0)
             )
-            new_states.append(tf.stack(outputs[1:]))
-            outputs = outputs[0]
-            if rnn["ln"] is not None:
-                outputs = rnn["ln"](outputs, training=False)
-            if rnn["projection"] is not None:
-                outputs = rnn["projection"](outputs, training=False)
-        return outputs, tf.stack(new_states, axis=0)
+            new_states.append(tf.stack([h, c]))
+            x = rnn["ln"](x, training=False)
+
+        return x, tf.stack(new_states, axis=0)
