@@ -133,8 +133,22 @@ class AudioFeaturizer:
         bs = tf.shape(x)[0]
 
         if self.normalize_type == "per_feature":
-            mean_list = tf.TensorArray(tf.float32, size=bs, clear_after_read=True)
-            std_list = tf.TensorArray(tf.float32, size=bs, clear_after_read=True)
+            # element_shape of TensorArray must be specified for tflite conversion
+            # ref: https://github.com/tensorflow/tensorflow/issues/40221
+
+            mean_list = tf.TensorArray(
+                tf.float32,
+                size=bs,
+                clear_after_read=True,
+                element_shape=tf.TensorShape((self.n_mels)),
+            )
+            std_list = tf.TensorArray(
+                tf.float32,
+                size=bs,
+                clear_after_read=True,
+                element_shape=tf.TensorShape((self.n_mels)),
+            )
+
             for i in range(bs):
                 mean_list = mean_list.write(
                     i, tf.math.reduce_mean(x[i, :, : audio_lens[i]], axis=1)
@@ -142,6 +156,7 @@ class AudioFeaturizer:
                 std_list = std_list.write(
                     i, tf.math.reduce_std(x[i, :, : audio_lens[i]], axis=1)
                 )
+
             x_mean = mean_list.stack()
             x_std = std_list.stack()
             # make sure x_std is not zero

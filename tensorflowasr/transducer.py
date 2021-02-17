@@ -166,7 +166,12 @@ class Transducer(tf.keras.Model):
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
         if mxp_enabled:
-            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+            # for tensorflow 2.3
+            optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
+                optimizer, "dynamic"
+            )
+            # for tensorflow 2.4
+            # optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
 
         return optimizer
 
