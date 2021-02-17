@@ -1,9 +1,9 @@
 import queue
 
 import tensorflow as tf
+from utils.utils import get_reduced_length
 
-from subsample import StackSubsample
-from utils import get_reduced_length
+from modules.subsample import StackSubsample
 
 
 class RNNTEncoder(tf.keras.layers.Layer):

@@ -73,12 +73,12 @@ optimizer:
   beta_2: 0.999
  
   lr_scheduler:
-    _target_: lr_scheduler.WarmupCosineAnnealing
+    _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_ratio: 0.05
     warmup_learning_rate: 1e-6
 
 encoder:
-  _target_: rnnt_encoder.RNNTEncoder
+  _target_: modules.rnnt_encoder.RNNTEncoder
   dim_model: 320
   num_units: 1024
   num_layers: 8
@@ -86,16 +86,16 @@ encoder:
   reduction_factors: [3, 2]
 
 predictor:
-  _target_: transducer_predictor.TransducerPredictor
+  _target_: modules.transducer_predictor.TransducerPredictor
   num_layers: 2
   embed_dim: 320
   dim_model: 1024
   random_state_sampling: true
 
 joint:
-  _target_: transducer_joint.TransducerJoint
+  _target_: modules.transducer_joint.TransducerJoint
   dim_model: 320
   activation: tanh
 
 tflite:
-  batch_size: 1
+  model_path: tflites/rnnt.tflite
