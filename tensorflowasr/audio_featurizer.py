@@ -39,9 +39,6 @@ class AudioFeaturizer:
         return features.numpy()
 
     def tf_extract(self, audio_signals, audio_lens):
-        # COMPAT (short for compatibility)
-        # audio_signals = tf.expand_dims(audio_signals, axis=0)
-
         x = audio_signals
         del audio_signals
 

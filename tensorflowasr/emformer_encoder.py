@@ -52,7 +52,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 feat_in=feat_out,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
-                activation=tf.keras.activations.relu,
+                activation=tf.nn.relu,
                 name=f"{self.name}_vgg_subsample",
             )
 

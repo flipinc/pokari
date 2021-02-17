@@ -68,17 +68,14 @@ text_feature:
 
 optimizer:
   name: adam
-  # learning_rate: 0.0005
+  learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
-
-  # for quick debugging
-  learning_rate: 0.0001
  
-  # lr_scheduler:
-  #   _target_: lr_scheduler.WarmupCosineAnnealing
-  #   warmup_ratio: 0.05
-  #   warmup_learning_rate: 1e-6
+  lr_scheduler:
+    _target_: lr_scheduler.WarmupCosineAnnealing
+    warmup_ratio: 0.05
+    warmup_learning_rate: 1e-6
 
 encoder:
   _target_: rnnt_encoder.RNNTEncoder
@@ -99,3 +96,6 @@ joint:
   _target_: transducer_joint.TransducerJoint
   dim_model: 320
   activation: tanh
+
+tflite:
+  batch_size: 1
