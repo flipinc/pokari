@@ -1,5 +1,3 @@
-import random
-
 import tensorflow as tf
 
 from utils import shape_list
@@ -15,84 +13,83 @@ class SpectrogramAugmentation:
     time_masks - how many time segments should be cut
     freq_width - maximum number of frequencies to be cut in one segment
     time_width - maximum number of time steps to be cut in one segment.
-        Can be a positive integer or a float value in the range [0, 1].
-        If positive integer value, defines maximum number of time steps
-        to be cut in one segment.
-        If a float value, defines maximum percentage of timesteps that
-        are cut adaptively.
     """
 
     def __init__(self, freq_masks=0, time_masks=0, freq_width=10, time_width=10):
-        super().__init__()
+        self.freq_mask = FreqencyMask(num_masks=freq_masks, mask_width=freq_width)
+        self.time_mask = TimeMask(num_masks=time_masks, mask_width=time_width)
 
-        self._rng = random.Random()
-
-        self.freq_masks = freq_masks
-        self.time_masks = time_masks
-
-        self.freq_width = freq_width
-        self.time_width = time_width
-
-        if isinstance(time_width, int):
-            self.adaptive_temporal_width = False
-        else:
-            if time_width > 1.0 or time_width < 0.0:
-                raise ValueError(
-                    "If `time_width` is a float value, must be in range [0, 1]"
-                )
-
-            self.adaptive_temporal_width = True
-
-    @tf.function
     def __call__(self, audio_signals):
-        # [B, T, D] -> [B, D, T]
-        audio_signals = tf.transpose(audio_signals, (0, 2, 1))
-
-        _, f, t = shape_list(audio_signals)
-
-        if self.adaptive_temporal_width:
-            time_width = max(1, int(t * self.time_width))
-        else:
-            time_width = self.time_width
-
-        def specaug(audio_signal: tf.Tensor):
-            for i in range(self.freq_masks):
-                x_left = tf.random.uniform([], 0, f - self.freq_width, dtype=tf.int32)
-
-                w = tf.random.uniform([], 0, self.freq_width, dtype=tf.int32)
-
-                mask = tf.concat(
-                    [
-                        tf.ones([x_left, t], dtype=audio_signal.dtype),
-                        tf.zeros([w, t], dtype=audio_signal.dtype),
-                        tf.ones([f - w - x_left, t], dtype=audio_signal.dtype),
-                    ],
-                    axis=0,
-                )
-
-                audio_signal = audio_signal * mask
-
-            for i in range(self.time_masks):
-                y_left = tf.random.uniform([], 0, t - time_width, dtype=tf.int32)
-
-                w = tf.random.uniform([], 0, time_width, dtype=tf.int32)
-
-                mask = tf.concat(
-                    [
-                        tf.ones([f, y_left], dtype=audio_signal.dtype),
-                        tf.zeros([f, w], dtype=audio_signal.dtype),
-                        tf.ones([f, t - w - y_left], dtype=audio_signal.dtype),
-                    ],
-                    axis=1,
-                )
-
-                audio_signal = audio_signal * mask
-
-            return audio_signal
-
-        audio_signals = tf.map_fn(specaug, audio_signals)
-
-        # [B, D, T] -> [B, T, D]
-        audio_signals = tf.transpose(audio_signals, (0, 2, 1))
-
+        """
+        Args:
+            audio_signals: [B, T, D]
+        """
+        audio_signals = tf.map_fn(self.freq_mask, audio_signals)
+        audio_signals = tf.map_fn(self.time_mask, audio_signals)
         return audio_signals
+
+
+class FreqencyMask:
+    def __init__(self, num_masks: int = 1, mask_width: float = 27):
+        self.num_masks = num_masks
+        self.mask_width = mask_width
+
+    def __call__(self, spectrogram: tf.Tensor):
+        """Masking the frequency channels
+        Args:
+            spectrogram: shape (T, D)
+        Returns:
+            frequency masked spectrogram
+        """
+        T, F = shape_list(spectrogram, out_type=tf.int32)
+        for _ in range(self.num_masks):
+            f = tf.random.uniform([], minval=0, maxval=self.mask_width, dtype=tf.int32)
+            f = tf.minimum(f, F)
+            f0 = tf.random.uniform([], minval=0, maxval=(F - f), dtype=tf.int32)
+            mask = tf.concat(
+                [
+                    tf.ones([T, f0], dtype=spectrogram.dtype),
+                    tf.zeros([T, f], dtype=spectrogram.dtype),
+                    tf.ones([T, F - f0 - f], dtype=spectrogram.dtype),
+                ],
+                axis=1,
+            )
+            spectrogram = spectrogram * mask
+        return spectrogram
+
+
+class TimeMask:
+    def __init__(
+        self, num_masks: int = 1, mask_width: float = 100, p_upperbound: float = 1.0
+    ):
+        self.num_masks = num_masks
+        self.mask_width = mask_width
+        self.p_upperbound = p_upperbound
+
+    def __call__(self, spectrogram: tf.Tensor):
+        """Masking the time channel
+        Args:
+            spectrogram: shape (T, D)
+        Returns:
+            frequency masked spectrogram
+        """
+        T, F = shape_list(spectrogram, out_type=tf.int32)
+        for _ in range(self.num_masks):
+            t = tf.random.uniform([], minval=0, maxval=self.mask_width, dtype=tf.int32)
+            t = tf.minimum(
+                t,
+                tf.cast(
+                    tf.cast(T, dtype=tf.float32) * self.p_upperbound, dtype=tf.int32
+                ),
+            )
+            t0 = tf.random.uniform([], minval=0, maxval=(T - t), dtype=tf.int32)
+            mask = tf.concat(
+                [
+                    tf.ones([t0, F], dtype=spectrogram.dtype),
+                    tf.zeros([t, F], dtype=spectrogram.dtype),
+                    tf.ones([T - t0 - t, F], dtype=spectrogram.dtype),
+                ],
+                axis=0,
+            )
+            spectrogram = spectrogram * mask
+        return spectrogram

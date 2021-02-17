@@ -8,17 +8,17 @@ trainer:
   max_queue_size: 8 # TODO: what is the optimal value? batch size * n?
   use_multiprocessing: true
   checkpoint:
-    filepath: outputs/tensorflow_asr/checkpoints/{epoch:02d}.h5
+    filepath: outputs/tensorflow_asr/checkpoints/emformer_{epoch:02d}.h5
     save_best_only: true
     save_weights_only: false
     save_freq: epoch
   states_dir: outputs/tensorflow_asr/states
   tensorboard:
-    log_dir: outputs/tensorflow_asr
+    log_dir: outputs/tensorflow_asr/logs
     histogram_freq: 1
     write_graph: true
     write_images: true
-    update_freq: epoch
+    update_freq: batch
     profile_batch: 2
 
 spec_augment:
@@ -83,14 +83,14 @@ optimizer:
 encoder:
   _target_: emformer_encoder.EmformerEncoder
   feat_in: *n_mels
-  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 8 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
   subsampling: vgg # frame stacking in paper
   subsampling_factor: 4
-  subsampling_dim: 256 
+  subsampling_dim: 256
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
   chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
   right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)

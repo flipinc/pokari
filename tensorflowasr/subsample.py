@@ -5,31 +5,6 @@ import tensorflow as tf
 from utils import shape_list
 
 
-class TimeReduction(tf.keras.layers.Layer):
-    def __init__(self, factor: int, name: str = "TimeReduction", **kwargs):
-        super(TimeReduction, self).__init__(name=name, **kwargs)
-        self.time_reduction_factor = factor
-
-    def padding(self, time):
-        new_time = (
-            tf.math.ceil(time / self.time_reduction_factor) * self.time_reduction_factor
-        )
-        return tf.cast(new_time, dtype=tf.int32) - time
-
-    def call(self, inputs, **kwargs):
-        shape = shape_list(inputs)
-        outputs = tf.pad(inputs, [[0, 0], [0, self.padding(shape[1])], [0, 0]])
-        outputs = tf.reshape(
-            outputs, [shape[0], -1, shape[-1] * self.time_reduction_factor]
-        )
-        return outputs
-
-    def get_config(self):
-        config = super(TimeReduction, self).get_config()
-        config.update({"factor": self.time_reduction_factor})
-        return config
-
-
 class VggSubsample(tf.keras.layers.Layer):
     """Causal Vgg subsampling introduced in https://arxiv.org/pdf/1910.12977.pdf
 
@@ -48,8 +23,9 @@ class VggSubsample(tf.keras.layers.Layer):
         feat_out: int,
         conv_channels: int,
         activation=tf.keras.activations.relu,
+        name: str = "vgg_subsample",
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self.sampling_num = int(math.log(subsampling_factor, 2))
 
@@ -60,36 +36,43 @@ class VggSubsample(tf.keras.layers.Layer):
         self.pool_stride = 2
         self.pool_kernel_size = 2
 
-        self.conv = tf.keras.Sequential()
+        self.layers = []
         for i in range(self.sampling_num):
-            self.conv.add(
-                tf.keras.layers.Conv2D(
-                    filters=conv_channels,
-                    kernel_size=self.kernel_size,
-                    strides=1,
-                    padding="valid"  # first padding is added manually
-                    if i == 0
-                    else "same",
-                )
+            conv1 = tf.keras.layers.Conv2D(
+                filters=conv_channels,
+                kernel_size=self.kernel_size,
+                strides=1,
+                padding="valid"  # first padding is added manually
+                if i == 0
+                else "same",
+                data_format="channels_first",
             )
-            self.conv.add(tf.keras.layers.Activation(activation))
-            self.conv.add(
-                tf.keras.layers.Conv2D(
-                    filters=conv_channels,
-                    kernel_size=self.kernel_size,
-                    strides=1,
-                    padding="same",
-                )
+            act1 = tf.keras.layers.Activation(activation)
+            conv2 = tf.keras.layers.Conv2D(
+                filters=conv_channels,
+                kernel_size=self.kernel_size,
+                strides=1,
+                padding="same",
+                data_format="channels_first",
             )
-            self.conv.add(tf.keras.layers.Activation(activation))
-            self.conv.add(
-                tf.keras.layers.MaxPool2D(
-                    pool_size=self.pool_kernel_size,
-                    strides=self.pool_stride,
-                    # according to  pytorch implementation, this should be "valid"
-                    # but, length will be incorrect
-                    padding="same",
-                )
+            act2 = tf.keras.layers.Activation(activation)
+            pool = tf.keras.layers.MaxPool2D(
+                pool_size=self.pool_kernel_size,
+                strides=self.pool_stride,
+                # according to  pytorch implementation, this should be "valid"
+                # but, length will be incorrect
+                padding="same",
+                data_format="channels_first",
+            )
+
+            self.layers.append(
+                {
+                    "conv1": conv1,
+                    "act1": act1,
+                    "conv2": conv2,
+                    "act2": act2,
+                    "pool": pool,
+                }
             )
 
         in_length = feat_in
@@ -127,28 +110,57 @@ class VggSubsample(tf.keras.layers.Layer):
             [B, Tmax, D]
         """
         # 1. add padding to make this causal convolution
-        padding = tf.constant([[0, 0], [1, 1], [self.left_padding, 0]])
-        x = tf.pad(x, padding)
+        x = tf.pad(x, [[0, 0], [1, 1], [self.left_padding, 0]])
+
+        # 2. add channel dimension -> [B, 1, Tmax, D]
+        x = tf.expand_dims(x, axis=1)
 
         # 2. forward
-        x = tf.expand_dims(x, axis=-1)
-        x = self.conv(x)
+        for layer in self.layers:
+            x = layer["conv1"](x)
+            x = layer["act1"](x)
+            x = layer["conv2"](x)
+            x = layer["act2"](x)
+            x = layer["pool"](x)
 
-        b, t, f, c = shape_list(x)
+        b, c, t, f = shape_list(x)
+        x = tf.transpose(x, [0, 2, 1, 3])
         x = tf.reshape(x, [b, t, c * f])
         x = self.out(x)
 
         # 3. calculate new length
         # TODO: improve the performance of length calculation
-        for i in range(self.sampling_num):
+        for i in tf.range(self.sampling_num):
             audio_lens = tf.map_fn(self.calc_tensor_length, audio_lens)
 
         return x, audio_lens
 
 
-def stack_subsample(x: tf.Tensor, audio_lens: tf.Tensor, subsampling_factor: int):
-    bs, t, f = shape_list(x)
-    t_new = tf.math.ceil(t / subsampling_factor)
-    x = tf.reshape(x, [bs, t_new, f * subsampling_factor])
-    audio_lens = tf.math.ceil(audio_lens / subsampling_factor)
-    return x, audio_lens
+def call(self, inputs, **kwargs):
+    shape = shape_list(inputs)
+    outputs = tf.pad(inputs, [[0, 0], [0, self.padding(shape[1])], [0, 0]])
+    outputs = tf.reshape(
+        outputs, [shape[0], -1, shape[-1] * self.time_reduction_factor]
+    )
+    return outputs
+
+
+class StackSubsample(tf.keras.layers.Layer):
+    def __init__(self, subsampling_factor: int, name: str = "stack_subsample"):
+        super().__init__(name=name)
+
+        self.subsampling_factor = subsampling_factor
+
+    def call(self, x, audio_lens):
+        bs, t_max, f = shape_list(x)
+
+        t_new = tf.cast(tf.math.ceil(t_max / self.subsampling_factor), tf.int32)
+        pad_amount = tf.cast(t_new * self.subsampling_factor, tf.int32) - t_max
+        audio_lens = tf.cast(
+            tf.math.ceil(audio_lens / self.subsampling_factor), tf.int32
+        )
+
+        x = tf.pad(x, [[0, 0], [0, pad_amount], [0, 0]])
+        x = tf.reshape(x, [bs, -1, f * self.subsampling_factor])
+
+        return x, audio_lens

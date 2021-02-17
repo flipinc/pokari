@@ -73,8 +73,6 @@ class Transducer(tf.keras.Model):
             "optimizer": optimizer,
             "loss": loss,
             "run_eagerly": cfgs.trainer.run_eagerly,
-            # "loss_weights": loss_weights,
-            # "weighted_metrics": weighted_metrics,
         }
 
         self.fit_args = {
@@ -203,6 +201,7 @@ class Transducer(tf.keras.Model):
 
     def train_step(self, batch):
         x, y_true = batch
+
         with tf.GradientTape() as tape:
             y_pred = self(
                 {
@@ -215,13 +214,16 @@ class Transducer(tf.keras.Model):
             )
             loss = self.loss(y_true, y_pred)
             scaled_loss = self.optimizer.get_scaled_loss(loss)
+
         scaled_gradients = tape.gradient(scaled_loss, self.trainable_weights)
         gradients = self.optimizer.get_unscaled_gradients(scaled_gradients)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+
         return {"train_loss": loss}
 
     def test_step(self, batch):
         x, y_true = batch
+
         y_pred = self(
             {
                 "audio_signals": x["audio_signals"],
@@ -232,6 +234,7 @@ class Transducer(tf.keras.Model):
             training=False,
         )
         loss = self.loss(y_true, y_pred)
+
         return {"val_loss": loss}
 
     def encoder_inference(self, features: tf.Tensor, states: tf.Tensor):

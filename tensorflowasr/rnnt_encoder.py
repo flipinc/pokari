@@ -2,7 +2,7 @@ import queue
 
 import tensorflow as tf
 
-from subsample import TimeReduction
+from subsample import StackSubsample
 from utils import get_reduced_length
 
 
@@ -113,8 +113,8 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         super().__init__(**kwargs)
 
         if reduction_factor > 0:
-            self.reduction = TimeReduction(
-                reduction_factor, name=f"{self.name}_reduction"
+            self.reduction = StackSubsample(
+                reduction_factor, name=f"{self.name}_stack_subsample"
             )
         else:
             self.reduction = None
