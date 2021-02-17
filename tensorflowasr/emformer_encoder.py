@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import tensorflow as tf
 
-from subsample import VggSubsample, stack_subsample
+from subsample import StackSubsample, VggSubsample
 
 
 class EmformerEncoder(tf.keras.layers.Layer):
@@ -22,8 +22,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        name: str = "emformer_encoder",
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
@@ -39,13 +40,21 @@ class EmformerEncoder(tf.keras.layers.Layer):
             raise ValueError("dim_model must be divisible by subsampling_factor.")
 
         self.linear = tf.keras.layers.Dense(feat_out)
-        self.subsample = VggSubsample(
-            subsampling_factor=self.subsampling_factor,
-            feat_in=feat_out,
-            feat_out=dim_model,
-            conv_channels=subsampling_dim,
-            activation=tf.keras.activations.relu,
-        )
+
+        if self.subsampling == "stack":
+            self.subsample = StackSubsample(
+                subsampling_factor=self.subsampling_factor,
+                name=f"{self.name}_stack_subsample",
+            )
+        elif self.subsampling == "vgg":
+            self.subsample = VggSubsample(
+                subsampling_factor=self.subsampling_factor,
+                feat_in=feat_out,
+                feat_out=dim_model,
+                conv_channels=subsampling_dim,
+                activation=tf.keras.activations.relu,
+                name=f"{self.name}_vgg_subsample",
+            )
 
         self.layers = []
         for i in range(self.num_layers):
@@ -57,6 +66,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 left_length=self.left_length,
                 chunk_length=self.chunk_length,
                 right_length=self.right_length,
+                name=f"{self.name}_{i}_block",
             )
             self.layers.append(layer)
 
@@ -183,7 +193,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
             t_max (int): this cannot be inferred by audio_lens because longest input_len
                 may be padded for efficiency
         """
-        bs = audio_lens.shape[0]
+        bs = tf.shape(audio_lens)[0]
         num_chunks = tf.cast(tf.math.ceil(t_max / self.chunk_length), tf.int32)
 
         # TODO: this is allocating more than what is actually required
@@ -196,7 +206,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
         )
         mask_right = tf.zeros([bs, upperbound_right_length, t_max], tf.int32)
 
-        # right_indexes = tf.constant([], tf.int32)
         right_indexes = tf.TensorArray(
             tf.int32, size=0, dynamic_size=True, clear_after_read=True
         )
@@ -481,11 +490,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 1. projection
         x = self.linear(audio_features)
 
-        # 2. vgg subsampling
-        if self.subsampling == "stack":
-            x, audio_lens = stack_subsample(x, audio_lens, self.subsampling_factor)
-        elif self.subsampling == "vgg":
-            x, audio_lens = self.subsample(x, audio_lens)
+        # 2. subsampling
+        x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create padding mask
         segment_length = tf.shape(x)[1]
@@ -534,10 +540,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         x = self.linear(audio_features)
 
         # 2. subsampling
-        if self.subsampling == "stack":
-            x, audio_lens = stack_subsample(x, audio_lens, self.subsampling_factor)
-        elif self.subsampling == "vgg":
-            x, audio_lens = self.subsample(x, audio_lens)
+        x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
@@ -558,7 +561,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         return x, audio_lens
 
-    @tf.function
     def call(
         self,
         audio_features: tf.Tensor,
@@ -597,8 +599,9 @@ class EmformerBlock(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        name: str = "emformer_block",
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self.left_length = left_length
         self.chunk_length = chunk_length

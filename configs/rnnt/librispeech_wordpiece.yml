@@ -1,24 +1,24 @@
 trainer:
   devices: [0]
   mxp: true
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 20
   workers: 8
   max_queue_size: 8 # TODO: what is the optimal value? batch size * n?
   use_multiprocessing: true
   checkpoint:
-    filepath: outputs/tensorflow_asr/checkpoints/{epoch:02d}.h5
+    filepath: outputs/tensorflow_asr/checkpoints/rnnt_{epoch:02d}.h5
     save_best_only: true
     save_weights_only: false
     save_freq: epoch
   states_dir: outputs/tensorflow_asr/states
   tensorboard:
-    log_dir: outputs/tensorflow_asr
+    log_dir: outputs/tensorflow_asr/logs
     histogram_freq: 1
     write_graph: true
     write_images: true
-    update_freq: epoch
+    update_freq: batch
     profile_batch: 2
 
 spec_augment:
