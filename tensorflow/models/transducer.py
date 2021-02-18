@@ -263,7 +263,9 @@ class Transducer(tf.keras.Model):
         else:
             gradients = tape.gradient(loss, self.trainable_weights)
 
-        # TODO: variational noise (gaussian noise) is does not work
+        # TODO: variational noise (gaussian noise) is does not work. Copy simulate()
+        # in pytorch implementation
+
         # if self.variational_noise_cfg is not None:
         #     tf.print("🐳", self.optimizer.iterations)
         #     start_step = self.variational_noise_cfg.pop("start_step")
@@ -341,33 +343,31 @@ class Transducer(tf.keras.Model):
 
         return tensorboard_logs
 
-    @tf.function
-    def stream(
-        self,
-        features: tf.Tensor,
-        input_length: tf.Tensor,
-        parallel_iterations: int = 10,
-        swap_memory: bool = True,
-    ):
-        """
-        RNN Transducer Greedy decoding
-        Args:
-            features (tf.Tensor): a batch of padded extracted features
+    # TODO: this function is not implemented for new APIs yet
+    # @tf.function
+    # def stream(
+    #     self,
+    #     features: tf.Tensor,
+    #     input_length: tf.Tensor,
+    #     parallel_iterations: int = 10,
+    #     swap_memory: bool = True,
+    # ):
+    #     encoded, _ = self.encoder.stream(features, self.encoder.get_initial_state())
+    #     return self.inference.greedy_naive_batch_decode(
+    #         encoded,
+    #         input_length,
+    #         parallel_iterations=parallel_iterations,
+    #         swap_memory=swap_memory,
+    #     )
 
-        Returns:
-            tf.Tensor: a batch of decoded transcripts
-        """
-        encoded, _ = self.encoder.stream(features, self.encoder.get_initial_state())
-        return self.inference.greedy_naive_batch_decode(
-            encoded,
-            input_length,
-            parallel_iterations=parallel_iterations,
-            swap_memory=swap_memory,
-        )
-
-    def stream_tflite(
+    def stream_one_tflite(
         self, audio_signals, predicted, cache_encoder_states, cache_predictor_states
     ):
+        """Streaming tflite model for batch size = 1
+
+        TODO: Add batch_size as an argument and if its one, implement the following.
+
+        """
         audio_signals = tf.expand_dims(audio_signals, axis=0)  # add batch dim
         audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
         audio_features, _ = self.audio_featurizer.tf_extract(audio_signals, audio_lens)
@@ -376,7 +376,7 @@ class Transducer(tf.keras.Model):
             encoded_outs, cache_encoder_states = self.encoder.stream(
                 audio_features, cache_encoder_states
             )
-            encoded_outs = tf.squeeze(encoded_outs, axis=0)
+            encoded_outs = tf.squeeze(encoded_outs, axis=0)  # remove batch dim
 
         hypothesis = self.inference.greedy_decode(
             encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
@@ -386,12 +386,13 @@ class Transducer(tf.keras.Model):
 
     def make_tflite_function(self):
         return tf.function(
-            self.stream_tflite,
+            self.stream_one_tflite,
             input_signature=[
                 tf.TensorSpec([None], dtype=tf.float32),
                 tf.TensorSpec([], dtype=tf.int32),
                 tf.TensorSpec(
-                    self.encoder.get_initial_state().get_shape(), dtype=tf.float32
+                    self.encoder.get_initial_state(batch_size=1).get_shape(),
+                    dtype=tf.float32,
                 ),
                 tf.TensorSpec(
                     self.predictor.get_initial_state(batch_size=1).get_shape(),

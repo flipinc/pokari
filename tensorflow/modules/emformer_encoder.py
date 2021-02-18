@@ -1,5 +1,4 @@
 import math
-from typing import Optional
 
 import numpy as np
 import tensorflow as tf
@@ -446,61 +445,90 @@ class EmformerEncoder(tf.keras.layers.Layer):
     def stream(
         self,
         audio_features: tf.Tensor,
-        audio_lens: tf.Tensor,
-        cache_k: Optional[tf.Tensor] = None,
-        cache_v: Optional[tf.Tensor] = None,
+        cache: tf.Tensor,
     ):
-        bs = tf.shape(audio_features)[0]
+        """
+        Note: cache_k and cache_v must be given. These can be retrieved by calling
+        get_initial_state().
 
-        if bs > 1:
-            max_len = tf.math.reduce_max(audio_lens)
-            min_len = tf.math.reduce_min(audio_lens)
-            if max_len != min_len:
-                raise ValueError(
-                    "In streaming mode, all audio lens must be equal if batch size > 1"
-                )
+        Note: streaming can be done in batch, however, all batch must have same length.
 
+        Args:
+            cache: two for cache_k and cache_v. [2, N, B, L, H, D]
+
+        """
         # 1. projection
         x = self.linear(audio_features)
 
         # 2. subsampling
-        x, audio_lens = self.subsample(x, audio_lens)
+        x = self.subsample(x)
 
-        # 3. create padding mask
-        segment_length = tf.shape(x)[1]
-        mask = tf.numpy_function(
-            self.create_stream_mask, [audio_lens, segment_length], [tf.bool]
-        )
-
-        # 4. loop over layers while saving cache at the same time
-        if cache_k is None or cache_v is None:
-            # alternatively, this can be a list of size [B, L, Head, Dim] x num_layer
-            # but for simplicity, everything is packed in tf.Tensor
-            cache_k = cache_v = self.get_initial_state(bs)
-
+        # 3. loop over layers while saving cache at the same time
         new_cache_k = tf.TensorArray(
-            self.dtype, size=len(self.layers), clear_after_read=True
+            self.dtype,
+            size=len(self.layers),
+            clear_after_read=True,
+            element_shape=tf.TensorShape(
+                (
+                    None,  # batch size
+                    self.left_length,
+                    self.num_heads,
+                    self.dim_model // self.num_heads,
+                )
+            ),
         )
         new_cache_v = tf.TensorArray(
-            self.dtype, size=len(self.layers), clear_after_read=True
+            self.dtype,
+            size=len(self.layers),
+            clear_after_read=True,
+            element_shape=tf.TensorShape(
+                (
+                    None,  # batch size
+                    self.left_length,
+                    self.num_heads,
+                    self.dim_model // self.num_heads,
+                )
+            ),
         )
         for i, layer in enumerate(self.layers):
-            x, (temp_cache_k, temp_cache_v) = layer(
-                x, mask, cache_k[i], cache_v[i], mode="stream"
-            )
+            x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
             new_cache_k = new_cache_k.write(i, temp_cache_k)
             new_cache_v = new_cache_v.write(i, temp_cache_v)
         new_cache_k = new_cache_k.stack()
         new_cache_v = new_cache_v.stack()
+        new_cache = tf.stack([new_cache_k, new_cache_v], axis=0)
 
-        # 5. Trim right context
+        # 4. Trim right context
         x = x[:, : self.chunk_length, :]
 
-        new_audio_lens = tf.repeat(self.chunk_length, [bs])
+        return x, new_cache
 
-        return x, new_audio_lens, new_cache_k, new_cache_v
+    def get_initial_state(self, batch_size: int):
+        """Get initial state for streaming emformer"""
+        return tf.zeros(
+            [
+                2,  # cache_k and cache_v
+                self.num_layers,
+                batch_size,
+                self.left_length,
+                self.num_heads,
+                self.dim_model // self.num_heads,
+            ]
+        )
 
-    def full_context(self, audio_features: tf.Tensor, audio_lens: tf.Tensor):
+    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32):
+        """
+
+        D_1: number of mels. This number has to match D_2 after frame stacking
+        D_2: encoder dim.
+
+        Args:
+            audio_features (tf.Tensor): [B, Tmax, D_1]
+            audio_lens (tf.int32): [B]
+
+        Returns:
+            tf.Tensor: [B, Tmax, D_2]
+        """
         # 1. projection
         x = self.linear(audio_features)
 
@@ -521,49 +549,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
             x, _ = layer(x, mask)
 
         # 6. Trim copied right context
-        # TODO: does len() work in graph mode?
         x = x[:, len(right_indexes) :, :]
 
         return x, audio_lens
-
-    def get_initial_state(self, batch_size: int):
-        """Get initial state for streaming emformer"""
-        return tf.zeros(
-            [
-                self.num_layers,
-                batch_size,
-                self.left_length,
-                self.num_heads,
-                self.dim_model // self.num_heads,
-            ]
-        )
-
-    def call(
-        self,
-        audio_features: tf.Tensor,
-        audio_lens: tf.int32,
-        cache_k: Optional[tf.Tensor] = None,
-        cache_v: Optional[tf.Tensor] = None,
-        mode: str = "full_context",
-    ):
-        """
-
-        D_1: number of mels. This number has to match D_2 after frame stacking
-        D_2: encoder dim.
-
-        Args:
-            audio_features (tf.Tensor): [B, Tmax, D_1]
-            audio_lens (tf.int32): [B]
-
-        Returns:
-            tf.Tensor: [B, Tmax, D_2]
-        """
-        if mode == "full_context":
-            return self.full_context(audio_features, audio_lens)
-        elif mode == "stream":
-            return self.stream(audio_features, audio_lens, cache_k, cache_v)
-        else:
-            raise ValueError(f"Invalid mode {mode}")
 
 
 class EmformerBlock(tf.keras.layers.Layer):
@@ -606,7 +594,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         q: tf.Tensor,
         k: tf.Tensor,
         v: tf.Tensor,
-        mask: tf.Tensor,
+        mask: tf.Tensor = None,
     ):
         bs = tf.shape(q)[0]
 
@@ -614,9 +602,12 @@ class EmformerBlock(tf.keras.layers.Layer):
         attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
 
         # 2. apply mask and softmax
-        attn_scores = tf.where(mask, attn_scores, float("-inf"))
-        attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-        attn_probs = tf.where(mask, attn_probs, 0.0)
+        if mask is not None:
+            attn_scores = tf.where(mask, attn_scores, float("-inf"))
+            attn_probs = tf.nn.softmax(attn_scores, axis=-1)
+            attn_probs = tf.where(mask, attn_probs, 0.0)
+        else:
+            attn_probs = tf.nn.softmax(attn_scores, axis=-1)
         attn_probs = self.attn_dropout(attn_probs)
 
         # 3. attend and add residual
@@ -640,7 +631,6 @@ class EmformerBlock(tf.keras.layers.Layer):
     def stream(
         self,
         input: tf.Tensor,
-        mask: tf.Tensor,
         cache_k: tf.Tensor,
         cache_v: tf.Tensor,
     ):
@@ -683,11 +673,27 @@ class EmformerBlock(tf.keras.layers.Layer):
         ]
         v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(input, q, k, v, mask)
+        output = self.attend(input, q, k, v)
 
         return output, (new_cache_k, new_cache_v)
 
-    def full_context(self, input: tf.Tensor, mask: tf.Tensor):
+    def call(
+        self,
+        input: tf.Tensor,
+        mask: tf.Tensor,
+    ):
+        """
+
+        N: number of chunks
+        R: number of right contexts in one chunk
+
+        Args:
+            input (tf.Tensor): [B, Total_R+Tmax, D]
+            mask (tf.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
+
+        Returns:
+            tf.Tensor: [B, Total_R+Tmax, D]
+        """
         bs = tf.shape(input)[0]
 
         # 1. perform layer norm
@@ -704,42 +710,3 @@ class EmformerBlock(tf.keras.layers.Layer):
         output = self.attend(input, q, k, v, mask)
 
         return output, None
-
-    def call(
-        self,
-        input: tf.Tensor,
-        mask: tf.Tensor,
-        cache_k: Optional[tf.Tensor] = None,
-        cache_v: Optional[tf.Tensor] = None,
-        mode: str = "full_context",
-    ):
-        """
-
-        N: number of chunks
-        R: number of right contexts in one chunk
-
-        Args:
-            input (tf.Tensor): [B, Total_R+Tmax, D]
-            mask (tf.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
-
-        Returns:
-            tf.Tensor: [B, Total_R+Tmax, D]
-        """
-
-        if mode == "full_context":
-            return self.full_context(input, mask)
-        elif mode == "stream":
-            if cache_k is None or cache_v is None:
-                bs = tf.shape(input)[0]
-                cache_k = cache_v = tf.zeros(
-                    [
-                        bs,
-                        self.left_length,
-                        self.num_heads,
-                        self.d_k,
-                    ]
-                )
-
-            return self.stream(input, mask, cache_k, cache_v)
-        else:
-            raise ValueError(f"Invalid mode {mode}")
