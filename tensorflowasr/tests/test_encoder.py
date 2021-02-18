@@ -1,13 +1,13 @@
 import tensorflow as tf
-from emformer_encoder import EmformerEncoder
 from hydra.utils import instantiate
+from modules.emformer_encoder import EmformerEncoder
 from omegaconf import OmegaConf
 
 subsampling_factor = 4
 
 cfg = OmegaConf.create(
     {
-        "_target_": "emformer_encoder.EmformerEncoder",
+        "_target_": "modules.emformer_encoder.EmformerEncoder",
         "subsampling": "vgg",
         "subsampling_factor": subsampling_factor,
         "subsampling_dim": 256,

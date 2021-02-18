@@ -6,7 +6,7 @@ from models.transducer import Transducer
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/emformer", job_name="rnnt")
+    initialize(config_path="../configs/rnnt", job_name="rnnt")
     cfgs = compose(config_name="librispeech_wordpiece.yml")
 
     tf.config.optimizer.set_experimental_options(
@@ -25,6 +25,6 @@ if __name__ == "__main__":
         global_batch_size *= strategy.num_replicas_in_sync
 
         transducer = Transducer(cfgs=cfgs, global_batch_size=global_batch_size)
-        transducer._build()
+        # transducer._build()
         transducer._compile()
         transducer._fit()

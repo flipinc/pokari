@@ -89,3 +89,7 @@ class ErrorRate(tf.keras.metrics.Metric):
         if self.denominator == 0.0:
             return 0.0
         return (self.numerator / self.denominator) * 100
+
+    def reset_states(self):
+        self.numerator.assign(0)
+        self.denominator.assign(0)
