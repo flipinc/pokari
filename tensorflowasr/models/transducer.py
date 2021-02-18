@@ -164,13 +164,16 @@ class Transducer(tf.keras.Model):
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
         if self.mxp_enabled:
-            tf.print("🐳", tf.__version__)
-            # for tensorflow 2.3
-            # optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
-            #     optimizer, "dynamic"
-            # )
-            # for tensorflow 2.4
-            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+            if "2.3" in tf.__version__:
+                optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
+                    optimizer, "dynamic"
+                )
+            elif "2.4" in tf.__version__:
+                optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+            else:
+                NotImplementedError(
+                    "Please check if this version is runnable and tflite convertible."
+                )
 
         return optimizer
 
@@ -251,27 +254,9 @@ class Transducer(tf.keras.Model):
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
 
-            import time
-
-            start_time = time.time()
-
-            results = self.inference._greedy_batch_decode(encoded_outs, logit_lens)
-
-            tf.print("🐳 NEW", logit_lens, time.time() - start_time)
+            results, _ = self.inference._greedy_batch_decode(encoded_outs, logit_lens)
 
             tf.print("❓ PRED: \n", results[0])
-            tf.print("❓ PRED: \n", results[1])
-
-            start_time = time.time()
-
-            results = self.inference._greedy_naive_batch_decode(
-                encoded_outs, logit_lens
-            )
-
-            tf.print("🐳 NAIVE", logit_lens, time.time() - start_time)
-
-            tf.print("❓ PRED: \n", results[0])
-            tf.print("❓ PRED: \n", results[1])
             tf.print(
                 "🧩 TRUE: \n",
                 tf.strings.unicode_encode(

@@ -79,8 +79,13 @@ class Inference(tf.keras.layers.Layer):
             dtype=tf.int32,
             size=0,
             dynamic_size=True,
-            clear_after_read=True,
+            clear_after_read=False,
         )
+
+        # after some training iterations (usually very beginning of the
+        # first epoch), model starts to predict all blanks. So, something has to be
+        # inside labels in order to stack().
+        labels = labels.write(0, tf.fill([bs], 0))
 
         last_label = tf.fill([bs, 1], self.text_featurizer.blank)
 
@@ -126,33 +131,32 @@ class Inference(tf.keras.layers.Layer):
                 )
                 # bitwise_or return [1, B] so get rid of first dim -> [B]
                 blank_mask = tf.squeeze(
-                    tf.bitwise.bitwise_or(blank_mask, symbol_is_blank)
+                    tf.bitwise.bitwise_or(blank_mask, symbol_is_blank),
                 )
-
-                # labels = labels.write(labels.size(), symbols)
 
                 if tf.reduce_all(tf.cast(blank_mask, tf.bool)):
                     is_blank = tf.constant(1, tf.int32)
                 else:
                     blank_indices = tf.squeeze(
-                        tf.where(tf.cast(tf.equal(blank_mask, one), tf.int32)),
+                        tf.where(tf.cast(blank_mask, tf.int32)),
                         axis=-1,
                     )
                     non_blank_indices = tf.squeeze(
                         tf.where(tf.cast(tf.not_equal(blank_mask, one), tf.int32)),
                         axis=-1,
                     )
-                    ordered_indicies = tf.concat(
-                        [blank_indices, non_blank_indices], axis=0
+                    # index -> order in which actual value can be retrieved in order
+                    ordered_indicies = tf.argsort(
+                        # index -> which value is located at that index
+                        tf.concat([blank_indices, non_blank_indices], axis=0)
                     )
 
                     # recover prior state for all samples which predicted blank now/past
-                    # if states is not None:
                     unchanged_states = tf.gather(states, blank_indices, axis=2)
-                    changes_states = tf.gather(next_states, non_blank_indices, axis=2)
+                    changed_states = tf.gather(next_states, non_blank_indices, axis=2)
 
                     unordered_next_states = tf.concat(
-                        [unchanged_states, changes_states], axis=2
+                        [unchanged_states, changed_states], axis=2
                     )
                     next_states = tf.gather(
                         unordered_next_states, ordered_indicies, axis=2
@@ -183,7 +187,6 @@ class Inference(tf.keras.layers.Layer):
                         size=bs,
                         clear_after_read=True,
                     )
-                    # prev_label_t = labels.read(t)
                     for symbol in next_symbols:
                         # if not blank add to label
                         if tf.equal(blank_mask[counter], zero):
@@ -192,29 +195,20 @@ class Inference(tf.keras.layers.Layer):
                             new_label_t = new_label_t.write(
                                 counter, self.text_featurizer.blank
                             )
-                        # else:
-                        #     # already finished predicting all timesteps
-                        #     if tf.math.greater_equal(t, encoded_lens[counter]):
-                        #         new_label_t = new_label_t.write(
-                        #             counter, self.text_featurizer.blank
-                        #         )
-                        #     # if not finished, keep the previous label
-                        #     else:
-                        #         new_label_t = new_label_t.write(
-                        #             counter, prev_label_t[counter]
-                        #         )
                         counter += 1
                     new_label_t = new_label_t.stack()
                     labels = labels.write(labels.size(), new_label_t)
 
                     symbols_added += 1
 
+        # [T, B]
+        labels = labels.stack()
+        tf.print("🐳", tf.shape(labels))
         # [B, T]
-        labels = tf.transpose(labels.stack(), (1, 0))
+        labels = tf.transpose(labels, (1, 0))
         labels = self.text_featurizer.iextract(labels)
 
-        # return labels, states
-        return labels
+        return labels, states
 
     def _greedy_naive_batch_decode(
         self,
