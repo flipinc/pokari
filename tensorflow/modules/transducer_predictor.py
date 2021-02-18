@@ -103,8 +103,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         return x
 
-    def recognize(self, x, states):
-        """Recognize function for prediction network
+    def stream(self, x, states):
+        """Stream function for prediction network
 
         Args:
             x (tf.Tensor): shape [1, 1]

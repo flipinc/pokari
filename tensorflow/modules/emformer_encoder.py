@@ -22,6 +22,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        sample_rate: int,  # used for creating streaming mask
         name: str = "emformer_encoder",
     ):
         super().__init__(name=name)
@@ -69,34 +70,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 name=f"{self.name}_{i}_block",
             )
             self.layers.append(layer)
-
-    def create_stream_mask(
-        self,
-        audio_lens: np.array,
-        segment_length: int,
-    ):
-        """
-
-        TODO: there is no need to create a mask for every pass since audio len is
-        fixed at inference time
-
-        """
-        audio_lens = audio_lens.astype("int32")
-
-        bs = audio_lens.shape[0]
-        mask = np.zeros([bs, segment_length, segment_length + self.left_length])
-
-        # TODO: if cache_k and cache_v is not given, there is no point of attending
-        # to the left chunk
-        # TODO: there should be a way to parallelize this
-        for i in range(bs):
-            max_len = int(audio_lens[i])
-            mask[i, :, max_len + self.left_length :] = 0
-            mask[i, max_len:, :] = 0
-
-        mask = np.expand_dims(mask, axis=1)
-
-        return mask == 0
 
     def punch_out_ones(
         self,
@@ -503,15 +476,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         if cache_k is None or cache_v is None:
             # alternatively, this can be a list of size [B, L, Head, Dim] x num_layer
             # but for simplicity, everything is packed in tf.Tensor
-            cache_k = cache_v = tf.zeros(
-                [
-                    self.num_layers,
-                    bs,
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                ]
-            )
+            cache_k = cache_v = self.get_initial_state(bs)
 
         new_cache_k = tf.TensorArray(
             self.dtype, size=len(self.layers), clear_after_read=True
@@ -560,6 +525,18 @@ class EmformerEncoder(tf.keras.layers.Layer):
         x = x[:, len(right_indexes) :, :]
 
         return x, audio_lens
+
+    def get_initial_state(self, batch_size: int):
+        """Get initial state for streaming emformer"""
+        return tf.zeros(
+            [
+                self.num_layers,
+                batch_size,
+                self.left_length,
+                self.num_heads,
+                self.dim_model // self.num_heads,
+            ]
+        )
 
     def call(
         self,

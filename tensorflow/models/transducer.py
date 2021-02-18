@@ -291,7 +291,7 @@ class Transducer(tf.keras.Model):
 
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
-        tensorboard_logs = {"transucer_loss": loss}
+        tensorboard_logs = {"loss": loss}
 
         # TODO: This code can be executed only in eager mode.
         if (self.step_counter + 1) % self.log_interval == 0:
@@ -337,25 +337,9 @@ class Transducer(tf.keras.Model):
         )
         loss = self.loss(y_true, y_pred)
 
-        tensorboard_logs = {"transucer_loss": loss}
+        tensorboard_logs = {"loss": loss}
 
         return tensorboard_logs
-
-    def encoder_inference(self, audio_features: tf.Tensor, states: tf.Tensor):
-        """Infer function for encoder (or encoders)
-
-        Args:
-            features (tf.Tensor): features with shape [T, F, C]
-            states (tf.Tensor): previous states of encoders with shape
-                [num_rnns, 1 or 2, 1, P]
-
-        Returns:
-            tf.Tensor: output of encoders with shape [T, E]
-            tf.Tensor: states of encoders with shape [num_rnns, 1 or 2, 1, P]
-        """
-        with tf.name_scope(f"{self.name}_encoder"):
-            outputs, states = self.encoder.stream(audio_features, states)
-            return tf.squeeze(outputs, axis=0), states
 
     @tf.function
     def stream(
@@ -387,9 +371,13 @@ class Transducer(tf.keras.Model):
         audio_signals = tf.expand_dims(audio_signals, axis=0)  # add batch dim
         audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
         audio_features, _ = self.audio_featurizer.tf_extract(audio_signals, audio_lens)
-        encoded_outs, cache_encoder_states = self.encoder_inference(
-            audio_features, cache_encoder_states
-        )
+
+        with tf.name_scope(f"{self.name}_encoder"):
+            encoded_outs, cache_encoder_states = self.encoder.stream(
+                audio_features, cache_encoder_states
+            )
+            encoded_outs = tf.squeeze(encoded_outs, axis=0)
+
         hypothesis = self.inference.greedy_decode(
             encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
         )

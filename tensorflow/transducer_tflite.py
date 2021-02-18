@@ -1,7 +1,7 @@
-import tensorflow as tf
 from hydra.experimental import compose, initialize
 from omegaconf import DictConfig
 
+import tensorflow as tf
 from models.transducer import Transducer
 
 tf.keras.backend.clear_session()
@@ -28,7 +28,7 @@ def convert_to_tflite(cfgs: DictConfig):
     return tflite_model
 
 
-initialize(config_path="../configs/rnnt", job_name="rnnt")
+initialize(config_path="../configs/emformer", job_name="emformer")
 cfgs = compose(config_name="librispeech_wordpiece.yml")
 
 if __name__ == "__main__":

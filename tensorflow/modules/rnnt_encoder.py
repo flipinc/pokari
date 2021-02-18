@@ -41,8 +41,13 @@ class RNNTEncoder(tf.keras.layers.Layer):
                 )
             )
 
-    def get_initial_state(self):
+    def get_initial_state(self, batch_size: int = None):
         """Get zeros states
+
+        Args:
+            batch_size: This is not needed for this encoder but all get_initial_state
+                must take this arg.
+            TODO: create meta class
 
         Returns:
             tf.Tensor: states having shape [num_rnns, 1 or 2, 1, P]
