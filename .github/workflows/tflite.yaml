@@ -5,7 +5,7 @@ on: [push]
 # TODO: it is much simpler to just use existing dockerfile and run script inside there
 
 jobs:
-  Test:
+  TFLite:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,8 +19,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install packages
         run: |
-          apt-get update && \
-          apt-get -y install \
+          sudo apt-get update && \
+          sudo apt-get -y install \
           libportaudio2 \
           libportaudiocpp0 \
           portaudio19-dev \
