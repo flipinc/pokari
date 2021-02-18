@@ -30,7 +30,7 @@ spec_augment:
 train_ds:
   stage: train
   data_paths:
-    - /workspace/datasets/tensorflow_asr_val.tsv
+    - /workspace/datasets/tensorflow_asr.tsv
   shuffle: true
   cache: true
   buffer_size: 100
@@ -109,3 +109,6 @@ joint:
   _target_: modules.transducer_joint.TransducerJoint
   dim_model: 320 # 640 in paper
   activation: tanh
+
+tflite:
+  model_path: tflites/emformer.tflite
