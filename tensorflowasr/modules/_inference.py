@@ -1,6 +1,9 @@
+import collections
 from typing import Optional, Tuple
 
 import tensorflow as tf
+
+Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
 
 
 class Inference(tf.keras.layers.Layer):
@@ -18,6 +21,145 @@ class Inference(tf.keras.layers.Layer):
 
         self.blank_idx = blank_index
         self.max_symbols = max_symbols_per_step
+
+    #######
+    # New impl
+    #######
+
+    def _greedy_naive_decode(
+        self,
+        encoded_out: tf.Tensor,
+        encoded_length: tf.Tensor,
+        predicted: tf.Tensor,
+        states: tf.Tensor,
+        parallel_iterations: int = 10,
+        swap_memory: bool = False,
+    ):
+        """Naive implementation of greedy decoding. Only Accepts Batch_size = 1
+
+        For better readability, we rely on Autograph as much as possible. See Github's
+        offical documentation for more info on Autograph.
+
+        https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/autograph
+        /g3doc/reference
+
+        Args:
+            encoded_out: [T, D]
+            encoded_len: [1]
+
+        TODO: this is ridiculously slow compared to pytorch implementation. the main
+        causes are pred_step and joint_step. should do something about this
+
+        """
+        hypothesis = Hypothesis(
+            index=predicted,
+            prediction=tf.TensorArray(
+                dtype=tf.int32,
+                size=encoded_length,
+                dynamic_size=False,
+                clear_after_read=False,
+                element_shape=tf.TensorShape([]),
+            ),
+            states=states,
+        )
+
+        time = tf.constant(0, dtype=tf.int32)
+        anchor = tf.constant(0, dtype=tf.int32)
+        for encoded_out_t in encoded_out:
+            is_blank = tf.constant(0, tf.int32)
+            symbols_added = tf.constant(0, tf.int32)
+
+            while tf.equal(is_blank, anchor) and tf.less(
+                symbols_added, self.max_symbols
+            ):
+                ytu, states = self.decoder_inference(
+                    encoded_outs=encoded_out_t,
+                    predicted=hypothesis.index,
+                    states=hypothesis.states,
+                )
+
+                symbol_idx = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # [1]
+
+                if tf.equal(symbol_idx, self.text_featurizer.blank):
+                    index = hypothesis.index
+                    states = hypothesis.states
+                    is_blank = tf.constant(1, tf.int32)
+                else:
+                    index = symbol_idx
+                    symbols_added += 1
+
+                prediction = hypothesis.prediction.write(time, symbol_idx)
+                hypothesis = Hypothesis(
+                    index=index, prediction=prediction, states=states
+                )
+
+            time += 1
+
+        return Hypothesis(
+            index=hypothesis.index,
+            prediction=hypothesis.prediction.stack(),
+            states=hypothesis.states,
+        )
+
+    def _greedy_naive_batch_decode(
+        self,
+        encoded_outs: tf.Tensor,
+        encoded_lens: tf.Tensor,
+        states: tf.Tensor = None,
+        parallel_iterations: int = 10,
+        swap_memory: bool = False,
+    ):
+        """Naive implementation of greedy batch decode, which loops over batch size.
+
+        N_p: number of layers in predictor
+
+        Args:
+            encoded_out: [B, T, D]
+            encoded_lens: [B]
+            states: List[([B, D], [B, D])] * N_p
+
+        """
+        batch_idx = tf.constant(0, dtype=tf.int32)
+        batch_size = tf.shape(encoded_outs)[0]
+        t_max = tf.shape(encoded_outs)[1]
+
+        if states is None:
+            states = self.predictor.get_initial_state(batch_size, training=False)
+
+        decoded = tf.TensorArray(
+            dtype=tf.int32,
+            size=batch_size,
+            dynamic_size=False,
+            clear_after_read=False,
+            element_shape=tf.TensorShape([None]),
+        )
+
+        for batch_idx in tf.range(batch_size):
+            hypothesis = self._greedy_naive_decode(
+                encoded_outs[batch_idx],
+                encoded_lens[batch_idx],
+                predicted=tf.constant(self.text_featurizer.blank, dtype=tf.int32),
+                states=tf.gather(states, [batch_idx], axis=2),
+            )
+
+            # TODO: do something better
+            # each batch may have different label length so pad to maximum length
+            prediction = tf.pad(
+                hypothesis.prediction,
+                paddings=[
+                    [0, self.max_symbols * t_max - tf.shape(hypothesis.prediction)[0]]
+                ],
+                mode="CONSTANT",
+                constant_values=self.text_featurizer.blank,
+            )
+
+            decoded = decoded.write(batch_idx, prediction)
+
+        return self.text_featurizer.iextract(decoded.stack())
+
+    #######
+    # Old impl
+    #######
 
     def _pred_step(
         self,
@@ -91,7 +233,7 @@ class Inference(tf.keras.layers.Layer):
 
         return hypotheses, cache_rnn_state
 
-    def _greedy_naive_decode(
+    def __greedy_naive_decode(
         self, encoded_out: tf.Tensor, encoded_len: tf.Tensor, states: tf.Tensor = None
     ):
         """Naive implementation of greedy decoding. Only Accepts Batch_size = 1
@@ -159,7 +301,7 @@ class Inference(tf.keras.layers.Layer):
 
         return labels, states
 
-    def _greedy_naive_batch_decode(
+    def __greedy_naive_batch_decode(
         self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
     ):
         """Naive implementation of greedy batch decode, which loops over batch size.
@@ -203,7 +345,7 @@ class Inference(tf.keras.layers.Layer):
 
         return labels.stack(), new_states.stack()
 
-    def _greedy_batch_decode(
+    def __greedy_batch_decode(
         self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
     ):
         """Greedy batch decoding in parallel"""
