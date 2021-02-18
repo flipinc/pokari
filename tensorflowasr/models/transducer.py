@@ -254,7 +254,9 @@ class Transducer(tf.keras.Model):
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
 
-            results, _ = self.inference._greedy_batch_decode(encoded_outs, logit_lens)
+            results = self.inference._greedy_naive_batch_decode(
+                encoded_outs, logit_lens
+            )
 
             tf.print("❓ PRED: \n", results[0])
             tf.print(
@@ -327,7 +329,7 @@ class Transducer(tf.keras.Model):
             tf.Tensor: a batch of decoded transcripts
         """
         encoded, _ = self.encoder.recognize(features, self.encoder.get_initial_state())
-        return self._perform_greedy_batch(
+        return self._greedy_naive_batch_decode(
             encoded,
             input_length,
             parallel_iterations=parallel_iterations,
@@ -343,7 +345,7 @@ class Transducer(tf.keras.Model):
         encoded_outs, cache_encoder_states = self.encoder_inference(
             audio_features, cache_encoder_states
         )
-        hypothesis = self._perform_greedy(
+        hypothesis = self._greedy_decode(
             encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
         )
         transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)

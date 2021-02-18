@@ -79,7 +79,7 @@ class Inference(tf.keras.layers.Layer):
             dtype=tf.int32,
             size=0,
             dynamic_size=True,
-            clear_after_read=False,
+            clear_after_read=True,
         )
 
         # after some training iterations (usually very beginning of the
@@ -309,13 +309,6 @@ class Inference(tf.keras.layers.Layer):
                     states=_hypothesis.states,
                 )
                 _predict = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # => argmax []
-
-                # something is wrong with tflite that drop support for tf.cond
-                # def equal_blank_fn(): return _hypothesis.index, _hypothesis.states
-                # def non_equal_blank_fn(): return _predict, _states  # update if the
-                # new prediction is a non-blank
-                # _index, _states = tf.cond(tf.equal(_predict, blank), equal_blank_fn,
-                # non_equal_blank_fn)
 
                 _equal = tf.equal(_predict, self.text_featurizer.blank)
                 _index = tf.where(_equal, _hypothesis.index, _predict)
