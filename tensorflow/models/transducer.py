@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import tensorflow as tf
 from datasets.dataset import Dataset
@@ -88,6 +89,11 @@ class Transducer(tf.keras.Model):
             "run_eagerly": cfgs.trainer.run_eagerly,
         }
 
+        now = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+        tensorboard_cfg = OmegaConf.to_container(cfgs.trainer.tensorboard)
+        tensorboard_cfg.update({"log_dir": tensorboard_cfg["log_dir"] + now})
+
         self.fit_args = {
             "x": train_dl,
             "validation_data": val_dl,
@@ -101,12 +107,7 @@ class Transducer(tf.keras.Model):
                 tf.keras.callbacks.ModelCheckpoint(
                     **OmegaConf.to_container(cfgs.trainer.checkpoint)
                 ),
-                tf.keras.callbacks.experimental.BackupAndRestore(
-                    cfgs.trainer.states_dir
-                ),
-                tf.keras.callbacks.TensorBoard(
-                    **OmegaConf.to_container(cfgs.trainer.tensorboard)
-                ),
+                tf.keras.callbacks.TensorBoard(**tensorboard_cfg),
             ],
         }
 
@@ -235,6 +236,10 @@ class Transducer(tf.keras.Model):
             "encoded_outs": encoded_outs,
         }
 
+    # in order to use AutoGraph feature (control flow conversions and so on),
+    # explicitly calling tf.function is required. This will be useful when implementing
+    # variational noise in the future
+    # ref: https://github.com/tensorflow/tensorflow/issues/42119#issuecomment-747098474
     def train_step(self, batch):
         x, y_true = batch
 
@@ -258,19 +263,26 @@ class Transducer(tf.keras.Model):
         else:
             gradients = tape.gradient(loss, self.trainable_weights)
 
-        if self.variational_noise_cfg is not None:
-            tf.print("🐳", self.optimizer.iterations)
-            start_step = self.variational_noise_cfg.pop("start_step")
-            start_step = start_step if start_step >= 0 else self.warmup_steps
-            if start_step <= self.optimizer.iterations:
-                gradients = [
-                    grad
-                    + tf.random.normal(
-                        **self.variational_noise_cfg,
-                        dtype=grad.dtype,
-                    )
-                    for grad in gradients
-                ]
+        # TODO: variational noise (gaussian noise) is does not work
+        # if self.variational_noise_cfg is not None:
+        #     tf.print("🐳", self.optimizer.iterations)
+        #     start_step = self.variational_noise_cfg.pop("start_step")
+
+        #     if tf.equal(start_step, -1):
+        #         start_step = self.warmup_steps
+
+        #     if tf.less_equal(start_step, self.step_counter):
+        #         gradients = [
+        #             tf.add(
+        #                 grad,
+        #                 tf.random.normal(
+        #                     tf.shape(grad),
+        #                     **self.variational_noise_cfg,
+        #                     dtype=grad.dtype,
+        #                 ),
+        #             )
+        #             for grad in gradients
+        #         ]
 
         if self.gradient_clip_val is not None:
             high = self.gradient_clip_val
@@ -281,15 +293,13 @@ class Transducer(tf.keras.Model):
 
         tensorboard_logs = {"transucer_loss": loss}
 
-        # This code is executed only in eager mode
-        if self.step_counter + 1 % self.log_interval == 0:
+        # TODO: This code can be executed only in eager mode.
+        if (self.step_counter + 1) % self.log_interval == 0:
             labels = y_true["labels"]
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
 
-            results = self.inference._greedy_naive_batch_decode(
-                encoded_outs, logit_lens
-            )
+            results = self.inference.greedy_naive_batch_decode(encoded_outs, logit_lens)
 
             tf.print("❓ PRED: \n", results[0])
             tf.print(
@@ -309,7 +319,7 @@ class Transducer(tf.keras.Model):
             self.wer.reset_states()
             self.cer.reset_states()
 
-            self.step_counter += 1
+        self.step_counter += 1
 
         return tensorboard_logs
 
@@ -344,11 +354,11 @@ class Transducer(tf.keras.Model):
             tf.Tensor: states of encoders with shape [num_rnns, 1 or 2, 1, P]
         """
         with tf.name_scope(f"{self.name}_encoder"):
-            outputs, states = self.encoder.recognize(audio_features, states)
+            outputs, states = self.encoder.stream(audio_features, states)
             return tf.squeeze(outputs, axis=0), states
 
     @tf.function
-    def recognize(
+    def stream(
         self,
         features: tf.Tensor,
         input_length: tf.Tensor,
@@ -363,15 +373,15 @@ class Transducer(tf.keras.Model):
         Returns:
             tf.Tensor: a batch of decoded transcripts
         """
-        encoded, _ = self.encoder.recognize(features, self.encoder.get_initial_state())
-        return self._greedy_naive_batch_decode(
+        encoded, _ = self.encoder.stream(features, self.encoder.get_initial_state())
+        return self.inference.greedy_naive_batch_decode(
             encoded,
             input_length,
             parallel_iterations=parallel_iterations,
             swap_memory=swap_memory,
         )
 
-    def recognize_tflite(
+    def stream_tflite(
         self, audio_signals, predicted, cache_encoder_states, cache_predictor_states
     ):
         audio_signals = tf.expand_dims(audio_signals, axis=0)  # add batch dim
@@ -380,7 +390,7 @@ class Transducer(tf.keras.Model):
         encoded_outs, cache_encoder_states = self.encoder_inference(
             audio_features, cache_encoder_states
         )
-        hypothesis = self._greedy_decode(
+        hypothesis = self.inference.greedy_decode(
             encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
         )
         transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
@@ -388,7 +398,7 @@ class Transducer(tf.keras.Model):
 
     def make_tflite_function(self):
         return tf.function(
-            self.recognize_tflite,
+            self.stream_tflite,
             input_signature=[
                 tf.TensorSpec([None], dtype=tf.float32),
                 tf.TensorSpec([], dtype=tf.int32),

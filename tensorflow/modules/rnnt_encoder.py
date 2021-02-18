@@ -75,8 +75,8 @@ class RNNTEncoder(tf.keras.layers.Layer):
 
         return x, audio_lens
 
-    def recognize(self, x, states):
-        """Recognize function for encoder network
+    def stream(self, x, states):
+        """Stream function for encoder network
 
         Args:
             inputs (tf.Tensor): shape [1, T, F, C]
@@ -88,7 +88,7 @@ class RNNTEncoder(tf.keras.layers.Layer):
         """
         new_states = []
         for idx, block in enumerate(self.blocks):
-            x, new_state = block.recognize(x, states=tf.unstack(states[idx], axis=0))
+            x, new_state = block.stream(x, states=tf.unstack(states[idx], axis=0))
             new_states.append(new_state)
 
         return x, tf.stack(new_states, axis=0)
@@ -138,7 +138,7 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         x = self.projection(x, training=training)
         return x
 
-    def recognize(self, x, states):
+    def stream(self, x, states):
         if self.reduction is not None:
             x = self.reduction(x)
         (x, h, c) = self.rnn(x, training=False, initial_state=states)

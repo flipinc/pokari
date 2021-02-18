@@ -1,7 +1,7 @@
 trainer:
   devices: [0]
   mxp: true
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 20
   workers: 8
@@ -13,9 +13,8 @@ trainer:
     save_best_only: true
     save_weights_only: false
     save_freq: epoch
-  states_dir: outputs/tensorflow/emformer_20200218_01/states
   tensorboard:
-    log_dir: outputs/tensorflow/emformer_20200218_01/logs
+    log_dir: outputs/tensorflow/logs/emformer/
     histogram_freq: 1
     write_graph: true
     write_images: true
@@ -58,7 +57,7 @@ audio_feature:
 
 text_feature:
   vocabulary: null
-  target_vocab_size: 1024 # 16,384
+  target_vocab_size: 1024 # 4096
   max_subword_length: 4 # 20
   blank_at_zero: true
   beam_width: 5

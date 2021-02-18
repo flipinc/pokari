@@ -3,7 +3,7 @@ from typing import Optional
 import tensorflow as tf
 
 
-class TransducerDecoder(tf.keras.layers.Layer):
+class TransducerDecoder:
     def __init__(self, labels: list, inference, blank_idx: int = 0):
         super().__init__()
 

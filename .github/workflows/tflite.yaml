@@ -1,4 +1,4 @@
-name: CI
+name: TFLite
 
 on: [push]
 
@@ -19,13 +19,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Test /pytorch with pytest
+      - name: Change dependencies to tflite compatibile version
+          pip install tensorflow==2.3
+          pip install tensorflow-io==0.16
+          pip install tensorflow-datasets==4.2
+      - name: Run TFLite conversion script
         run: |
-          cd pytorch
-          pytest
-          cd ..
-      - name: Test /tensorflow with pytest
-        run: |
-          cd tensorflow
-          pytest
-          cd ..
+          python3 tensorflow/transducer_tflite.py
