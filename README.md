@@ -18,7 +18,7 @@ Followings installation are required after Docker run:
 `tensorflow.python.framework.errors_impl.InvalidArgumentError: Attempting to add a duplicate function with name`,
 it is highly likely that reverting back tensorflow version might solve some issues (or at least give you directions to solve them). It is confirmed that tensorflow 2.3 
 works.
- 
+- tf.string is not supported in TFLite, so all models outputs Unicode instead.
 
 ### Design
 - Pytorch is very easy to quickly develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Once Pytorch's support for ScriptModule -> onnx conversion is decent enough, I am going to think this over again. 

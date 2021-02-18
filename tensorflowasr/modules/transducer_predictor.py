@@ -4,7 +4,6 @@ import tensorflow as tf
 class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
         self,
-        batch_size: int,
         num_classes: int,
         num_layers: int,
         dim_model: int,
@@ -21,7 +20,6 @@ class TransducerPredictor(tf.keras.layers.Layer):
         """
         super().__init__(name=name, **kwargs)
 
-        self.batch_size = batch_size
         self.num_layers = num_layers
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
@@ -39,7 +37,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
             ln = tf.keras.layers.LayerNormalization(name=f"{name}_ln_{i}")
             self.rnns.append({"rnn": rnn, "ln": ln})
 
-    def get_initial_state(self, training: bool = False):
+    def get_initial_state(self, batch_size: int, training: bool = False):
         """
 
         N: number of predictor network layers
@@ -55,11 +53,11 @@ class TransducerPredictor(tf.keras.layers.Layer):
         if self.random_state_sampling and training:
             for idx in range(self.num_layers):
                 h = tf.random.normal(
-                    (self.batch_size, self.dim_model),
+                    (batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 c = tf.random.normal(
-                    (self.batch_size, self.dim_model),
+                    (batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
@@ -68,11 +66,11 @@ class TransducerPredictor(tf.keras.layers.Layer):
         else:
             for idx in range(self.num_layers):
                 h = tf.zeros(
-                    (self.batch_size, self.dim_model),
+                    (batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 c = tf.zeros(
-                    (self.batch_size, self.dim_model),
+                    (batch_size, self.dim_model),
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
@@ -88,8 +86,10 @@ class TransducerPredictor(tf.keras.layers.Layer):
             target_lens: [B]
 
         """
+        bs = tf.shape(targets)[0]
+
         x = self.embed(targets)
-        states = self.get_initial_state(training)
+        states = self.get_initial_state(bs, training)
 
         for idx, rnn in enumerate(self.rnns):
             mask = tf.sequence_mask(target_lens)
