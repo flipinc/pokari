@@ -32,7 +32,7 @@ class Inference:
         with tf.name_scope("inference_decoder"):
             encoded_outs = tf.reshape(encoded_outs, [1, 1, -1])  # [D] => [1, 1, D]
             predicted = tf.reshape(predicted, [1, 1])  # [] => [1, 1]
-            y, new_states = self.predictor.recognize(
+            y, new_states = self.predictor.stream(
                 predicted, states
             )  # [1, 1, P], states
             ytu = tf.nn.log_softmax(
@@ -51,7 +51,7 @@ class Inference:
         """
         with tf.name_scope("inference_batch_decoder"):
             # [B, 1, D_p]
-            y, states = self.predictor.recognize(predicted, states)
+            y, states = self.predictor.stream(predicted, states)
             # [B, 1, 1, V]
             ytu = tf.nn.log_softmax(self.joint([encoded_outs, y], training=False))
             # [B, V]

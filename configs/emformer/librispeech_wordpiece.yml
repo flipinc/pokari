@@ -30,7 +30,7 @@ spec_augment:
 train_ds:
   stage: train
   data_paths:
-    - /workspace/datasets/tensorflow_asr.tsv
+    - /workspace/datasets/tensorflow_asr_val.tsv
   shuffle: true
   cache: true
   buffer_size: 100
@@ -47,7 +47,7 @@ validation_ds:
   drop_remainder: true
 
 audio_feature:
-  sample_rate: 16000
+  sample_rate: &sample_rate 16000
   window_size: 0.02
   window_stride: 0.01
   n_mels: &n_mels 80
@@ -85,7 +85,7 @@ optimizer:
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
   feat_in: *n_mels
-  num_layers: 8 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
@@ -96,6 +96,7 @@ encoder:
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
   chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
   right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
+  sample_rate: *sample_rate
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor
