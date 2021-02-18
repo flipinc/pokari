@@ -127,7 +127,7 @@ class GreedyInference(nn.Module):
 
             inseq = encoder_output  # [B, T, D]
             hypotheses, cache_rnn_state = self._greedy_batch_decode(
-                inseq, logitlen, device=inseq.device
+                inseq, logitlen, states=cache_rnn_state, device=inseq.device
             )
 
             # Note: following code will not work for TorchScript
@@ -139,14 +139,18 @@ class GreedyInference(nn.Module):
 
     @torch.no_grad()
     def _greedy_batch_decode(
-        self, x: torch.Tensor, out_len: torch.Tensor, device: torch.device
+        self,
+        x: torch.Tensor,
+        out_len: torch.Tensor,
+        states: torch.Tensor = None,
+        device: torch.device = None,
     ):
         # x: [B, T, D]
         # out_len: [B]
         # device: torch.device
 
         # Initialize state
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = states
         batchsize = x.shape[0]
 
         # Output string buffer
@@ -206,7 +210,8 @@ class GreedyInference(nn.Module):
                     )
 
                 # Batched joint step - Output = [B, V + 1]
-                logp = self._joint_step(f, g, log_normalize=None)[:, 0, 0, :]
+                joint_out = self._joint_step(f, g, log_normalize=None)
+                logp = joint_out[:, 0, 0, :]
 
                 if logp.dtype != torch.float32:
                     logp = logp.float()

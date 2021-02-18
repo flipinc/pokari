@@ -3,26 +3,28 @@ from hydra.experimental import compose, initialize
 import tensorflow as tf
 from models.transducer import Transducer
 
+tf.keras.backend.clear_session()
+
 if __name__ == "__main__":
-    tf.executing_eagerly()
-
     initialize(config_path="../configs/emformer", job_name="emformer")
-    cfg = compose(config_name="emformer_librispeech_char_tensorflow.yml")
+    cfgs = compose(config_name="librispeech_wordpiece.yml")
 
-    tf.keras.backend.clear_session()
+    tf.config.optimizer.set_experimental_options(
+        {"auto_mixed_precision": cfgs.trainer.mxp}
+    )
 
-    if "precision" in cfg:
-        tf.mixed_precision.set_global_policy(
-            tf.mixed_precision.Policy(**cfg["precision"])
-        )
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        visible_gpus = [gpus[i] for i in cfgs.trainer.devices]
+        tf.config.set_visible_devices(visible_gpus, "GPU")
 
     strategy = tf.distribute.MirroredStrategy()
-    # strategy = tf.distribute.OneDeviceStrategy(device="/gpu:0")s
 
     with strategy.scope():
-        num_replicas = strategy.num_replicas_in_sync
-        cfg.train_ds.batch_size *= num_replicas
-        cfg.validation_ds.batch_size *= num_replicas
+        global_batch_size = cfgs.trainer.batch_size
+        global_batch_size *= strategy.num_replicas_in_sync
 
-        model = Transducer(cfg=cfg)
-        model.train(num_replicas=num_replicas)
+        transducer = Transducer(cfgs=cfgs, global_batch_size=global_batch_size)
+        transducer._build()
+        transducer._compile()
+        transducer._fit()

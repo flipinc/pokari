@@ -97,6 +97,13 @@ class TransducerPredictor(nn.Module):
         g, _ = self.predict(y, state=states, add_sos=True)  # (B, U, D)
         g = g.transpose(1, 2)  # (B, D, U)
 
+        # Experiment: Zero out padded parts
+        bs = g.size(0)
+        mask = torch.ones(g.size()).to(device=g.device)
+        for idx in range(bs):
+            mask[idx, :, target_lens[idx] :] = 0
+        g = g * mask
+
         return g, target_lens
 
     def predict(
