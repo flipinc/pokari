@@ -30,8 +30,8 @@ class TestInference:
         encoded_outs = tf.random.normal((3, 240, 512))  # [B, T, D]
         encoded_lens = tf.constant([220, 240, 230])
 
-        result_1 = inference._greedy_batch_decode(encoded_outs, encoded_lens)
-        result_2 = inference._greedy_naive_batch_decode(encoded_outs, encoded_lens)
+        result_1, _ = inference.greedy_batch_decode(encoded_outs, encoded_lens)
+        result_2 = inference.greedy_naive_batch_decode(encoded_outs, encoded_lens)
 
         assert tf.reduce_sum(result_1[0]) == tf.reduce_sum(result_2[0])
         assert tf.reduce_sum(result_1[1]) == tf.reduce_sum(result_2[1])

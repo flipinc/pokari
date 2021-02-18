@@ -13,9 +13,9 @@ trainer:
     save_best_only: true
     save_weights_only: false
     save_freq: epoch
-  states_dir: outputs/tensorflow/rnnt_20200218_01/states
+    monitor: transducer_loss
   tensorboard:
-    log_dir: outputs/tensorflow/rnnt_20200218_01/logs
+    log_dir: outputs/tensorflow/logs/rnnt/
     histogram_freq: 1
     write_graph: true
     write_images: true
@@ -58,7 +58,7 @@ audio_feature:
 
 text_feature:
   vocabulary: null
-  target_vocab_size: 1024 # 16,384
+  target_vocab_size: 1024 # 4090 in contextnet
   max_subword_length: 4 # 20
   blank_at_zero: true
   beam_width: 5

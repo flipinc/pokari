@@ -5,7 +5,7 @@ import tensorflow as tf
 Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "states"))
 
 
-class Inference(tf.keras.layers.Layer):
+class Inference:
     def __init__(self, text_featurizer, predictor, joint, max_symbols: int = 1):
         super().__init__()
 
@@ -29,7 +29,7 @@ class Inference(tf.keras.layers.Layer):
         Returns:
             (ytu, new_states)
         """
-        with tf.name_scope(f"{self.name}_decoder"):
+        with tf.name_scope("inference_decoder"):
             encoded_outs = tf.reshape(encoded_outs, [1, 1, -1])  # [D] => [1, 1, D]
             predicted = tf.reshape(predicted, [1, 1])  # [] => [1, 1]
             y, new_states = self.predictor.recognize(
@@ -49,16 +49,17 @@ class Inference(tf.keras.layers.Layer):
             predicted: [B, 1]
 
         """
-        # [B, 1, D_p]
-        y, states = self.predictor.recognize(predicted, states)
-        # [B, 1, 1, V]
-        ytu = tf.nn.log_softmax(self.joint([encoded_outs, y], training=False))
-        # [B, V]
-        ytu = ytu[:, 0, 0, :]
+        with tf.name_scope("inference_batch_decoder"):
+            # [B, 1, D_p]
+            y, states = self.predictor.recognize(predicted, states)
+            # [B, 1, 1, V]
+            ytu = tf.nn.log_softmax(self.joint([encoded_outs, y], training=False))
+            # [B, V]
+            ytu = ytu[:, 0, 0, :]
 
-        return ytu, states
+            return ytu, states
 
-    def _greedy_batch_decode(
+    def greedy_batch_decode(
         self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
     ):
         """Greedy batch decoding in parallel
@@ -203,14 +204,13 @@ class Inference(tf.keras.layers.Layer):
 
         # [T, B]
         labels = labels.stack()
-        tf.print("🐳", tf.shape(labels))
         # [B, T]
         labels = tf.transpose(labels, (1, 0))
         labels = self.text_featurizer.iextract(labels)
 
         return labels, states
 
-    def _greedy_naive_batch_decode(
+    def greedy_naive_batch_decode(
         self,
         encoded: tf.Tensor,
         encoded_length: tf.Tensor,
@@ -224,15 +224,13 @@ class Inference(tf.keras.layers.Layer):
             encoded: [B, T, D]
 
         """
-        with tf.name_scope(f"{self.name}_greedy_naive_batch_decode"):
+        with tf.name_scope("greedy_naive_batch_decode"):
             total_batch = tf.shape(encoded)[0]
             batch = tf.constant(0, dtype=tf.int32)
 
             t_max = tf.math.reduce_max(encoded_length)
 
-            greedy_fn = (
-                self._greedy_decode if version == "v1" else self._greedy_decode_v2
-            )
+            greedy_fn = self.greedy_decode if version == "v1" else self.greedy_decode_v2
 
             decoded = tf.TensorArray(
                 dtype=tf.int32,
@@ -273,7 +271,7 @@ class Inference(tf.keras.layers.Layer):
 
             return self.text_featurizer.iextract(decoded.stack())
 
-    def _greedy_decode(
+    def greedy_decode(
         self,
         encoded: tf.Tensor,
         encoded_length: tf.Tensor,
@@ -282,7 +280,7 @@ class Inference(tf.keras.layers.Layer):
         parallel_iterations: int = 10,
         swap_memory: bool = False,
     ):
-        with tf.name_scope(f"{self.name}_greedy_decode"):
+        with tf.name_scope("greedy_decode"):
             time = tf.constant(0, dtype=tf.int32)
             total = encoded_length
 
@@ -335,7 +333,7 @@ class Inference(tf.keras.layers.Layer):
                 states=hypothesis.states,
             )
 
-    def _greedy_decode_v2(
+    def greedy_decode_v2(
         self,
         encoded: tf.Tensor,
         encoded_length: tf.Tensor,
@@ -345,7 +343,7 @@ class Inference(tf.keras.layers.Layer):
         swap_memory: bool = False,
     ):
         """ Ref: https://arxiv.org/pdf/1801.00841.pdf """
-        with tf.name_scope(f"{self.name}_greedy_decode_v2"):
+        with tf.name_scope("greedy_decode_v2"):
             time = tf.constant(0, dtype=tf.int32)
             total = encoded_length
 
