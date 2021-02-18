@@ -143,6 +143,18 @@ class Transducer(tf.keras.Model):
         """
         optim_cfg = OmegaConf.to_container(optim_cfg)
 
+        self.gradient_clip_val = (
+            optim_cfg.pop("gradient_clip_val")
+            if "gradient_clip_val" in optim_cfg
+            else None
+        )
+
+        self.variational_noise_cfg = (
+            optim_cfg.pop("variational_noise")
+            if "variational_noise" in optim_cfg
+            else None
+        )
+
         lr_scheduler_config = (
             optim_cfg.pop("lr_scheduler") if "lr_scheduler" in optim_cfg else None
         )
@@ -154,6 +166,7 @@ class Transducer(tf.keras.Model):
                 total_steps=total_steps,
                 learning_rate=learning_rate,
             )
+            self.warmup_steps = lr.warmup_steps
         else:
             lr = learning_rate
 
@@ -245,11 +258,31 @@ class Transducer(tf.keras.Model):
         else:
             gradients = tape.gradient(loss, self.trainable_weights)
 
+        if self.variational_noise_cfg is not None:
+            tf.print("🐳", self.optimizer.iterations)
+            start_step = self.variational_noise_cfg.pop("start_step")
+            start_step = start_step if start_step >= 0 else self.warmup_steps
+            if start_step <= self.optimizer.iterations:
+                gradients = [
+                    grad
+                    + tf.random.normal(
+                        **self.variational_noise_cfg,
+                        dtype=grad.dtype,
+                    )
+                    for grad in gradients
+                ]
+
+        if self.gradient_clip_val is not None:
+            high = self.gradient_clip_val
+            low = self.gradient_clip_val * -1
+            gradients = [(tf.clip_by_value(grad, low, high)) for grad in gradients]
+
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         tensorboard_logs = {"train_loss": loss}
 
-        if (self.step_counter + 1) % self.log_interval == 0:
+        # This code is executed only in eager mode
+        if self.step_counter + 1 % self.log_interval == 0:
             labels = y_true["labels"]
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
@@ -275,6 +308,8 @@ class Transducer(tf.keras.Model):
             # Average over each interval
             self.wer.reset_states()
             self.cer.reset_states()
+
+            self.step_counter += 1
 
         return tensorboard_logs
 
