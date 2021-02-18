@@ -1,7 +1,7 @@
 trainer:
   devices: [0]
   mxp: true
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 20
   workers: 8
@@ -77,6 +77,11 @@ optimizer:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_ratio: 0.05
     warmup_learning_rate: 1e-6
+
+  variational_noise:
+    mean: 0
+    stddev: 0.075
+    start_step: -1
 
 encoder:
   _target_: modules.rnnt_encoder.RNNTEncoder
