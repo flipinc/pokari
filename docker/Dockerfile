@@ -1,4 +1,5 @@
-FROM tensorflow/tensorflow:nightly-gpu
+# as of 2021/2/13, tensorflow/tensorflow:nightly-gpu or :latest-gpu has ome bugs related to RTX 3090 configuration
+FROM nvcr.io/nvidia/tensorflow:20.12-tf2-py3
 
 # install sndfile library
 RUN apt-get update && \
@@ -8,58 +9,16 @@ RUN apt-get update && \
     portaudio19-dev \
     libsndfile1-dev
 
-# install git
-RUN apt-get update && \
-    apt-get -y install \
-    git
-
-# install cmake
-RUN apt-get update && \
-    apt-get -y install \
-    cmake protobuf-compiler
-
-# install nano
-RUN apt-get update && \
-    apt-get -y install \
-    nano
-
-# install warprnnt
-# ref: https://github.com/HawkAaron/warp-transducer/issues/15
-RUN git clone https://github.com/HawkAaron/warp-transducer && \
-    cd warp-transducer && \
-    # build warprnnt
-    mkdir build && \
-    cd build && \
-    rm -f CMakeCache.txt && \
-    cmake -DCUDA_TOOLKIT_ROOT_DIR=$CUDA_HOME .. && \
-    make VERBOSE=1 && \
-    # set env flags
-    export CUDA_HOME="/usr/local/cuda" && \
-    export CUDA_TOOLKIT_ROOT_DIR=$CUDA_HOME && \
-    export LIBRARY_PATH=$CUDA_HOME/lib64:$LIBRARY_PATH && \
-    export LD_LIBRARY_PATH="$CUDA_HOME/extras/CUPTI/lib64:$LD_LIBRARY_PATH" && \
-    export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH && \
-    export CFLAGS="-I$CUDA_HOME/include $CFLAGS" && \
-    # install pytorch binding
-    cd ../tensorflow_binding && \
-    python3 setup.py install && \
-    rm -rf ../tests test ../pytorch_binding
-
-# see https://github.com/psf/black/issues/1707
+WORKDIR /tmp/pokari
+# see https://github.com/psf/black/issues/1707. tensorflow official docker image works fine
 RUN pip uninstall -y typing
-
 # install pokari dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+# see https://github.com/tensorflow/tensorflow/issues/43947
+RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcusolver.so.11 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcusolver.so.10
+RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcupti.so.11.1 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcupti.so.11.0
+
 WORKDIR /workspace/pokari
 COPY . .
-
-# Note: After docker built, you must cd into the following directory and edit `__init__.py` by commenting out everything after RegisterShape
-# nano /usr/local/lib/python3.6/dist-packages/warprnnt_tensorflow-0.1-py3.6-linux-x86_64.egg/warprnnt_tensorflow/__init__.py
-# ref: https://github.com/TensorSpeech/TensorFlowASR/issues/88
-# ref: https://github.com/HawkAaron/warp-transducer/issues/59
-# ref: https://stackoverflow.com/questions/59043649/attributeerror-module-tensorflow-python-framework-ops-has-no-attribute-regis
-
-
-

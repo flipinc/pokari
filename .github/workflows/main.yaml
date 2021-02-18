@@ -3,7 +3,7 @@ name: CI
 on: [push]
 
 jobs:
-  Test:
+  CI:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,6 +19,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Test with pytest
+      - name: Test /pytorch with pytest
         run: |
+          cd pytorch
           pytest
+          cd ..
+      - name: Test /tensorflow with pytest
+        run: |
+          cd tensorflow
+          pytest
+          cd ..
