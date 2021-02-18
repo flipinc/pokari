@@ -7,19 +7,19 @@ trainer:
   workers: 8
   max_queue_size: 8 # TODO: what is the optimal value? batch size * n?
   use_multiprocessing: true
-  log_interval: 1
+  log_interval: 100
   checkpoint:
-    filepath: outputs/tensorflow_asr/checkpoints/emformer_{epoch:02d}.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}.h5
     save_best_only: true
     save_weights_only: false
     save_freq: epoch
-  states_dir: outputs/tensorflow_asr/states
+  states_dir: outputs/tensorflow/emformer_20200218_01/states
   tensorboard:
-    log_dir: outputs/tensorflow_asr/logs
+    log_dir: outputs/tensorflow/emformer_20200218_01/logs
     histogram_freq: 1
     write_graph: true
     write_images: true
-    update_freq: batch
+    update_freq: 10
     profile_batch: 2
 
 spec_augment:

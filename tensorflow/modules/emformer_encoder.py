@@ -4,7 +4,7 @@ from typing import Optional
 import numpy as np
 import tensorflow as tf
 
-from modules.subsample import VggSubsample, stack_subsample
+from modules.subsample import StackSubsample, VggSubsample
 
 
 class EmformerEncoder(tf.keras.layers.Layer):
@@ -22,8 +22,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        name: str = "emformer_encoder",
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
@@ -39,13 +40,21 @@ class EmformerEncoder(tf.keras.layers.Layer):
             raise ValueError("dim_model must be divisible by subsampling_factor.")
 
         self.linear = tf.keras.layers.Dense(feat_out)
-        self.subsample = VggSubsample(
-            subsampling_factor=self.subsampling_factor,
-            feat_in=feat_out,
-            feat_out=dim_model,
-            conv_channels=subsampling_dim,
-            activation=tf.keras.activations.relu,
-        )
+
+        if self.subsampling == "stack":
+            self.subsample = StackSubsample(
+                subsampling_factor=self.subsampling_factor,
+                name=f"{self.name}_stack_subsample",
+            )
+        elif self.subsampling == "vgg":
+            self.subsample = VggSubsample(
+                subsampling_factor=self.subsampling_factor,
+                feat_in=feat_out,
+                feat_out=dim_model,
+                conv_channels=subsampling_dim,
+                activation=tf.nn.relu,
+                name=f"{self.name}_vgg_subsample",
+            )
 
         self.layers = []
         for i in range(self.num_layers):
@@ -57,6 +66,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 left_length=self.left_length,
                 chunk_length=self.chunk_length,
                 right_length=self.right_length,
+                name=f"{self.name}_{i}_block",
             )
             self.layers.append(layer)
 
@@ -65,6 +75,12 @@ class EmformerEncoder(tf.keras.layers.Layer):
         audio_lens: np.array,
         segment_length: int,
     ):
+        """
+
+        TODO: there is no need to create a mask for every pass since audio len is
+        fixed at inference time
+
+        """
         audio_lens = audio_lens.astype("int32")
 
         bs = audio_lens.shape[0]
@@ -82,8 +98,85 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         return mask == 0
 
-    def create_mask(self, audio_lens: np.array, t_max: int):
-        """Emformer attention mask
+    def punch_out_ones(
+        self,
+        bs,
+        height,
+        width,
+        top,
+        bottom,
+        left,
+        right,
+    ):
+        """Punch out (fill in ones) from size [Batch, height, width] mask
+
+        Args:
+            bs: batch size
+            height: height of mask
+            width: width of mask
+            top: begining of y index which must be filled in as one
+            bottom: end of y index which must be filled in as one
+            left: begining of x index which must be filled in as one
+            right: end of x index which must be filled in as one
+        Returns:
+            tf.int32: punched out mask
+
+        TODO: there is another way to implement this. Instead of scatter_nd,
+        sandwitch zero-tensor on one-tensor.
+
+        """
+        row_indices = tf.TensorArray(tf.int32, size=right - left, clear_after_read=True)
+        counter = tf.constant(0, tf.int32)
+        for i in tf.range(left, right):
+            row_indices = row_indices.write(counter, tf.expand_dims(i, axis=0))
+            counter += tf.constant(1, tf.int32)
+        row_indices = row_indices.stack()
+
+        value = tf.ones([right - left], tf.int32)
+
+        row = tf.scatter_nd(row_indices, value, [width])
+        row = tf.expand_dims(row, axis=0)  # [1, width]
+
+        belt = tf.tile(row, [bottom - top, 1])  # [bottom - top, width]
+
+        col_indices = tf.TensorArray(tf.int32, size=bottom - top, clear_after_read=True)
+        counter = tf.constant(0, tf.int32)
+        for i in tf.range(top, bottom):
+            col_indices = col_indices.write(counter, tf.expand_dims(i, axis=0))
+            counter += tf.constant(1, tf.int32)
+        col_indices = col_indices.stack()
+
+        target = tf.scatter_nd(col_indices, belt, [height, width])
+        target = tf.expand_dims(target, axis=0)  # [1, height, width]
+
+        targets = tf.tile(target, [bs, 1, 1])
+
+        return targets
+
+    def pad_mask(self, vertical_min, vertical_max, horizontal_min, horizontal_max):
+        """Pad emformer mask
+        For efficienct, mask is divided into three areas as follows:
+
+        0 0 0 0 1 1
+        0 0 0 0 1 1
+        0 0 0 0 1 1
+        2 2 2 2 2 2
+        2 2 2 2 2 2
+
+        Each number represents different mask.
+        """
+        mask_top_left = tf.ones([vertical_min, horizontal_min], tf.int32)
+        mask_top_right = tf.zeros(
+            [vertical_min, horizontal_max - horizontal_min], tf.int32
+        )
+        mask_bottom = tf.zeros([vertical_max - vertical_min, horizontal_max], tf.int32)
+        mask_pad_mask = tf.concat([mask_top_left, mask_top_right], axis=1)
+        mask_pad_mask = tf.concat([mask_pad_mask, mask_bottom], axis=0)
+
+        return mask_pad_mask
+
+    def create_mask(self, audio_lens: tf.int32, t_max: tf.int32):
+        """Tensorflow implementation of emformer attention mask
 
         There are four types of masks.
         - mask_body: A attention mask for every timestep.
@@ -100,6 +193,183 @@ class EmformerEncoder(tf.keras.layers.Layer):
             t_max (int): this cannot be inferred by audio_lens because longest input_len
                 may be padded for efficiency
         """
+        bs = tf.shape(audio_lens)[0]
+        num_chunks = tf.cast(tf.math.ceil(t_max / self.chunk_length), tf.int32)
+
+        # TODO: this is allocating more than what is actually required
+        upperbound_right_length = (num_chunks - 1) * self.right_length
+
+        mask_body = tf.zeros([bs, t_max, t_max], tf.int32)
+        mask_left = tf.zeros([bs, t_max, upperbound_right_length], tf.int32)
+        mask_diagnal = tf.zeros(
+            [bs, upperbound_right_length, upperbound_right_length], tf.int32
+        )
+        mask_right = tf.zeros([bs, upperbound_right_length, t_max], tf.int32)
+
+        right_indexes = tf.TensorArray(
+            tf.int32, size=0, dynamic_size=True, clear_after_read=True
+        )
+        for i in tf.range(num_chunks):
+            # 1. mark diagnal and left chunks
+            left_offset = (
+                self.chunk_length * i - self.left_length
+                if (self.chunk_length * i - self.left_length) >= 0
+                else 0
+            )
+            start_offset = self.chunk_length * i
+            end_offset = (
+                self.chunk_length * (i + 1)
+                if self.chunk_length * (i + 1) <= t_max
+                else t_max
+            )
+
+            mask_body += self.punch_out_ones(
+                bs,
+                width=t_max,
+                height=t_max,
+                left=left_offset,
+                right=end_offset,
+                top=start_offset,
+                bottom=end_offset,
+            )
+
+            # last segment does not have right context
+            if i == (num_chunks - 1):
+                break
+
+            # 2. hard copy right contexts
+            remaining_space = t_max - (end_offset + self.right_length)
+            if remaining_space >= 0:
+                this_right_length = self.right_length
+            else:
+                this_right_length = t_max - end_offset
+
+            mask_left += self.punch_out_ones(
+                bs,
+                height=t_max,
+                width=upperbound_right_length,
+                top=start_offset,
+                bottom=start_offset + self.chunk_length,
+                left=right_indexes.size(),
+                right=right_indexes.size() + this_right_length,
+            )
+
+            mask_diagnal += self.punch_out_ones(
+                bs,
+                height=upperbound_right_length,
+                width=upperbound_right_length,
+                top=right_indexes.size(),
+                bottom=right_indexes.size() + this_right_length,
+                left=right_indexes.size(),
+                right=right_indexes.size() + this_right_length,
+            )
+
+            mask_right += self.punch_out_ones(
+                bs,
+                height=upperbound_right_length,
+                width=t_max,
+                top=right_indexes.size(),
+                bottom=right_indexes.size() + this_right_length,
+                left=left_offset,
+                right=end_offset,
+            )
+
+            for offset in tf.range(
+                end_offset, end_offset + this_right_length, dtype=tf.int32
+            ):
+                right_indexes = right_indexes.write(right_indexes.size(), offset)
+
+        right_indexes = right_indexes.stack()
+        right_size = tf.shape(right_indexes)[0]
+
+        # 3. remove unused right contexts
+        kept_indicies = tf.range(right_size, dtype=tf.int32)
+        mask_left = tf.gather(mask_left, kept_indicies, axis=2)
+        mask_diagnal = tf.gather(mask_diagnal, kept_indicies, axis=1)
+        mask_diagnal = tf.gather(mask_diagnal, kept_indicies, axis=2)
+        mask_right = tf.gather(mask_right, kept_indicies, axis=1)
+
+        # 4. mask paddings
+        # TODO: there should be a way to parallelize this
+        padded_mask_body = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
+        padded_mask_right = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
+        padded_mask_left = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
+        padded_mask_diagnal = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
+        for i in tf.range(bs):
+            max_len = audio_lens[i]
+
+            # [None, 1]
+            to_be_padded_right_indicies = tf.where(right_indexes >= max_len)
+            if tf.shape(to_be_padded_right_indicies)[0] > 0:
+                # get raw value
+                pad_begin_index = tf.cast(to_be_padded_right_indicies[0][0], tf.int32)
+            else:
+                # if preprocessing are implemented right, there shouldn't be
+                # audio features that are less than the chunk size.
+                # But for now, temporary value is used for numerical efficiency.
+                # TODO: Does this affect any code?.
+                pad_begin_index = right_size
+
+            # 4.1 pad mask_body
+            mask_body_pad_mask = self.pad_mask(
+                vertical_min=max_len,
+                vertical_max=t_max,
+                horizontal_min=max_len,
+                horizontal_max=t_max,
+            )
+            padded_mask_body = padded_mask_body.write(
+                i, mask_body[i] * mask_body_pad_mask
+            )
+
+            # 4.2 pad mask_right
+            mask_right_pad_mask = self.pad_mask(
+                vertical_min=pad_begin_index,
+                vertical_max=right_size,
+                horizontal_min=max_len,
+                horizontal_max=t_max,
+            )
+            padded_mask_right = padded_mask_right.write(
+                i, mask_right[i] * mask_right_pad_mask
+            )
+
+            # 4.3 pad mask_left
+            mask_left_pad_mask = self.pad_mask(
+                vertical_min=max_len,
+                vertical_max=t_max,
+                horizontal_min=pad_begin_index,
+                horizontal_max=right_size,
+            )
+            padded_mask_left = padded_mask_left.write(
+                i, mask_left[i] * mask_left_pad_mask
+            )
+
+            # 4.4 pad mask_diagnal
+            mask_diagnal_pad_mask = self.pad_mask(
+                vertical_min=pad_begin_index,
+                vertical_max=right_size,
+                horizontal_min=pad_begin_index,
+                horizontal_max=right_size,
+            )
+            padded_mask_diagnal = padded_mask_diagnal.write(
+                i, mask_diagnal[i] * mask_diagnal_pad_mask
+            )
+
+        # 5. stack all masks
+        mask_body = padded_mask_body.stack()
+        mask_right = padded_mask_right.stack()
+        mask_left = padded_mask_left.stack()
+        mask_diagnal = padded_mask_diagnal.stack()
+
+        # 6. concatenate all masks
+        mask_top = tf.concat([mask_diagnal, mask_right], axis=-1)
+        mask_bottom = tf.concat([mask_left, mask_body], axis=-1)
+        mask = tf.concat([mask_top, mask_bottom], axis=-2)
+        mask = tf.expand_dims(mask, axis=1)
+
+        return tf.equal(mask, 0), right_indexes
+
+    def np_create_mask(self, audio_lens: np.array, t_max: int):
+        """Numpy implementatino of emformer attention mask"""
         audio_lens = audio_lens.astype("int32")
 
         bs = audio_lens.shape[0]
@@ -177,8 +447,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
             max_len = audio_lens[i]
 
             # 4.1 pad mask_body and mask_right
-            mask_body[i, :, max_len:] = 0
             mask_body[i, max_len:, :] = 0
+            mask_body[i, :, max_len:] = 0
             mask_right[i, :, max_len:] = 0
 
             to_be_padded = right_indexes[np.nonzero(right_indexes >= max_len)]
@@ -202,12 +472,12 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
     def stream(
         self,
-        audio_signals: tf.Tensor,
+        audio_features: tf.Tensor,
         audio_lens: tf.Tensor,
         cache_k: Optional[tf.Tensor] = None,
         cache_v: Optional[tf.Tensor] = None,
     ):
-        bs = tf.shape(audio_signals)[0]
+        bs = tf.shape(audio_features)[0]
 
         if bs > 1:
             max_len = tf.math.reduce_max(audio_lens)
@@ -218,14 +488,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 )
 
         # 1. projection
-        x = tf.transpose(audio_signals, (0, 2, 1))
-        x = self.linear(x)
+        x = self.linear(audio_features)
 
-        # 2. vgg subsampling
-        if self.subsampling == "stack":
-            x, audio_lens = stack_subsample(x, audio_lens, self.subsampling_factor)
-        elif self.subsampling == "vgg":
-            x, audio_lens = self.subsample(x, audio_lens)
+        # 2. subsampling
+        x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create padding mask
         segment_length = tf.shape(x)[1]
@@ -264,28 +530,21 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. Trim right context
         x = x[:, : self.chunk_length, :]
-        x = tf.transpose(x, (0, 2, 1))
 
         new_audio_lens = tf.repeat(self.chunk_length, [bs])
 
         return x, new_audio_lens, new_cache_k, new_cache_v
 
-    def full_context(self, audio_signals: tf.Tensor, audio_lens: tf.Tensor):
+    def full_context(self, audio_features: tf.Tensor, audio_lens: tf.Tensor):
         # 1. projection
-        x = tf.transpose(audio_signals, [0, 2, 1])
-        x = self.linear(x)
+        x = self.linear(audio_features)
 
         # 2. subsampling
-        if self.subsampling == "stack":
-            x, audio_lens = stack_subsample(x, audio_lens, self.subsampling_factor)
-        elif self.subsampling == "vgg":
-            x, audio_lens = self.subsample(x, audio_lens)
+        x, audio_lens = self.subsample(x, audio_lens)
 
         # 3. create attention mask
-        t_new = tf.shape(x)[1]
-        mask, right_indexes = tf.numpy_function(
-            self.create_mask, [audio_lens, t_new], [tf.bool, tf.int32]
-        )
+        t_new = tf.cast(tf.shape(x)[1], tf.int32)
+        mask, right_indexes = self.create_mask(audio_lens, t_new)
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
@@ -299,14 +558,13 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 6. Trim copied right context
         # TODO: does len() work in graph mode?
         x = x[:, len(right_indexes) :, :]
-        x = tf.transpose(x, [0, 2, 1])
 
-        return x, audio_lens, None, None
+        return x, audio_lens
 
     def call(
         self,
-        audio_signals: tf.Tensor,
-        audio_lens: np.array,
+        audio_features: tf.Tensor,
+        audio_lens: tf.int32,
         cache_k: Optional[tf.Tensor] = None,
         cache_v: Optional[tf.Tensor] = None,
         mode: str = "full_context",
@@ -317,17 +575,16 @@ class EmformerEncoder(tf.keras.layers.Layer):
         D_2: encoder dim.
 
         Args:
-            audio_signals (tf.Tensor): [B, D_1, Tmax]
-            audio_lens (np.array): [B]
+            audio_features (tf.Tensor): [B, Tmax, D_1]
+            audio_lens (tf.int32): [B]
 
         Returns:
-            tf.Tensor: [B, D_2, Tmax]
+            tf.Tensor: [B, Tmax, D_2]
         """
-
         if mode == "full_context":
-            return self.full_context(audio_signals, audio_lens)
+            return self.full_context(audio_features, audio_lens)
         elif mode == "stream":
-            return self.stream(audio_signals, audio_lens, cache_k, cache_v)
+            return self.stream(audio_features, audio_lens, cache_k, cache_v)
         else:
             raise ValueError(f"Invalid mode {mode}")
 
@@ -342,8 +599,9 @@ class EmformerBlock(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        name: str = "emformer_block",
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self.left_length = left_length
         self.chunk_length = chunk_length
