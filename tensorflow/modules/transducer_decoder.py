@@ -4,15 +4,13 @@ import tensorflow as tf
 
 
 class TransducerDecoder(tf.keras.layers.Layer):
-    def __init__(self, labels, inference):
+    def __init__(self, labels: list, inference, blank_idx: int = 0):
         super().__init__()
 
-        self.blank_id = 0
-        # + 1 for blank idx
-        self.labels = [""] + labels
+        self.blank_id = blank_idx
+        self.labels = labels
         self.inference = inference
 
-    @tf.function
     def __call__(
         self,
         encoder_output: tf.Tensor,
