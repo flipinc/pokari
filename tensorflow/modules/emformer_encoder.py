@@ -21,7 +21,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
-        sample_rate: int,  # used for creating streaming mask
         name: str = "emformer_encoder",
     ):
         super().__init__(name=name)
