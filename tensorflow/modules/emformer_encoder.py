@@ -158,6 +158,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
             with copied right contexts.
 
         Note: Only used during training.
+        Note: In graph mode this is as fast as numpy impl. But using this in eager mode
+        is not recommended
 
         Args:
             audio_lens (tf.Tensor): [B]

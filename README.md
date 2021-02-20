@@ -20,5 +20,13 @@ it is highly likely that reverting back tensorflow version might solve some issu
 works.
 - tf.string is not supported in TFLite, so all models outputs Unicode instead.
 
+### Limitations on Tensorflow Version
+- Since warp_rnnt (optimized for CUDA for faster loss calculation) is not used, training time is much slower than PyTorch. It is desirable to use ![this library](https://github.com/HawkAaron/warp-transducer), but its required tensorflow version conflicts with RTX3090 which I am using for training.
+- Gradient variational noise is not implemented yet
+
 ### Design
-- Pytorch is very easy to quickly develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Once Pytorch's support for ScriptModule -> onnx conversion is decent enough, I am going to think this over again. 
+- Pytorch is very easy to develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Transducer model is quite complex because of its stateful structure, and I have not yet seen any successfully exported PyTorch models. For reference, CTC can be exported and ![NeMo](https://github.com/NVIDIA/NeMo/blob/25abffdd37efb3a9f5a6e236d910f045271ae08f/nemo/collections/asr/models/ctc_models.py) provides an interface for it.
+
+### Run locally
+- Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI).
+- To run TFLite models locally, install ![SoundCard](https://github.com/bastibe/SoundCard) by running `pip install soundcard`.

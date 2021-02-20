@@ -26,5 +26,9 @@ if __name__ == "__main__":
 
         transducer = Transducer(cfgs=cfgs, global_batch_size=global_batch_size)
         transducer._build()
+
+        if "model_path" in cfgs.trainer:
+            transducer.load_weights(cfgs.trainer.model_path)
+
         transducer._compile()
         transducer._fit()
