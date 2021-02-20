@@ -10,8 +10,6 @@ RUN apt-get update && \
     libsndfile1-dev
 
 WORKDIR /tmp/pokari
-# see https://github.com/psf/black/issues/1707. tensorflow official docker image works fine
-RUN pip uninstall -y typing
 # install pokari dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt

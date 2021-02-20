@@ -24,7 +24,9 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
 
-        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim, mask_zero=True)
+        # mask_zero=True <= does this make any difference at training time? if not this
+        # should be included because apparently this improves inference accuracy
+        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim)
 
         self.rnns = []
         for i in range(num_layers):

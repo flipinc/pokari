@@ -51,9 +51,11 @@ class Inference:
         """
         with tf.name_scope("inference_batch_decoder"):
             # [B, 1, D_p]
-            y, states = self.predictor.stream(predicted, states)
+            predictor_outs, states = self.predictor.stream(predicted, states)
+            # [B, T, U, V]
+            joint_outs = self.joint([encoded_outs, predictor_outs], training=False)
             # [B, 1, 1, V]
-            ytu = tf.nn.log_softmax(self.joint([encoded_outs, y], training=False))
+            ytu = tf.nn.log_softmax(joint_outs)
             # [B, V]
             ytu = ytu[:, 0, 0, :]
 

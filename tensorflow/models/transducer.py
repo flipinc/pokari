@@ -253,7 +253,6 @@ class Transducer(tf.keras.Model):
         # in pytorch implementation
 
         # if self.variational_noise_cfg is not None:
-        #     tf.print("🐳", self.optimizer.iterations)
         #     start_step = self.variational_noise_cfg.pop("start_step")
 
         #     if tf.equal(start_step, -1):
@@ -281,13 +280,14 @@ class Transducer(tf.keras.Model):
 
         tensorboard_logs = {"loss": loss}
 
-        # TODO: This code can be executed only in eager mode.
+        # TODO: This code can be executed only in eager mode. so for graph mode,
+        # log_interval must be > 1 for tracing to be disabled
         if (self.step_counter + 1) % self.log_interval == 0:
             labels = y_true["labels"]
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
 
-            results = self.inference.greedy_naive_batch_decode(encoded_outs, logit_lens)
+            results, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
 
             tf.print("❓ PRED: \n", results[0])
             tf.print(

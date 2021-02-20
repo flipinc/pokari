@@ -1,15 +1,16 @@
 trainer:
   devices: [0]
   mxp: true
-  run_eagerly: false
-  batch_size: 2
+  run_eagerly: true
+  batch_size: 4
   epochs: 100
   workers: 16 # 8 cores x 2
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 100
+  log_interval: 1
+  model_path: outputs/tensorflow/checkpoints/rnnt_01.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_01.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -19,7 +20,7 @@ trainer:
     histogram_freq: 1
     write_graph: true
     write_images: true
-    update_freq: 100
+    update_freq: 50
     profile_batch: 0
 
 spec_augment:
@@ -56,16 +57,22 @@ audio_feature:
   dither: 1e-5
   pad_to: 8
 
+# text_feature:
+#   vocabulary: null
+#   target_vocab_size: 4096
+#   max_subword_length: 20
+#   blank_at_zero: true
+#   beam_width: 5
+#   norm_score: true
+#   subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
+#   subwords_corpus: # Transcript files for generating subwords
+#     - /workspace/datasets/tensorflow_asr_360.tsv
+
+# character
 text_feature:
+  _target_: frontends.text_featurizer.CharFeaturizer
   vocabulary: null
-  target_vocab_size: 4096
-  max_subword_length: 20
   blank_at_zero: true
-  beam_width: 5
-  norm_score: true
-  subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-  subwords_corpus: # Transcript files for generating subwords
-    - /workspace/datasets/tensorflow_asr_360.tsv
 
 optimizer:
   name: adam
@@ -76,7 +83,7 @@ optimizer:
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_ratio: 0.05
-    warmup_learning_rate: 1e-6
+    warmup_learning_rate: 1e-5
 
   variational_noise:
     mean: 0
