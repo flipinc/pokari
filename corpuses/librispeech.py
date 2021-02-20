@@ -9,7 +9,7 @@ def create_tsv(
     out_file="tensorflow_asr.tsv",
 ):
     """
-    Create a tsv file which adheres to TensorflowASR format
+    Create a tsv file which adheres to tensorflow format
 
     PATH\tDURATION\tTRANSCRIPT
 
@@ -124,13 +124,25 @@ def create_manifest(
 if __name__ == "__main__":
     # create_tsv()
 
-    create_tsv(
-        path_to_dataset="/workspace/datasets/dev/dev-clean",
-        out_dir="/workspace/datasets",
-        out_file="tensorflow_asr_val.tsv",
-    )
+    # create_tsv(
+    #     path_to_dataset="/workspace/datasets/train-large/train-clean-360",
+    #     out_dir="/workspace/datasets",
+    #     out_file="tensorflow_asr_360.tsv",
+    # )
+
+    # create_tsv(
+    #     path_to_dataset="/workspace/datasets/dev/dev-clean",
+    #     out_dir="/workspace/datasets",
+    #     out_file="tensorflow_asr_val.tsv",
+    # )
 
     # create_manifest()
+
+    create_manifest(
+        path_to_dataset="/workspace/datasets/train-large/train-clean-360",
+        out_dir="/workspace/datasets",
+        out_file="manifest_train_360.json",
+    )
 
     # create_manifest(
     #     path_to_dataset="/workspace/datasets/dev/dev-clean",

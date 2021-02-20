@@ -1,4 +1,3 @@
-import math
 import os
 
 import librosa
@@ -125,10 +124,14 @@ class Dataset:
 
         dataset = dataset.prefetch(AUTOTUNE)
 
-        if self.drop_remainder:
-            self.steps_per_epoch = math.floor(float(len(dataset)) / float(batch_size))
-        else:
-            self.steps_per_epoch = math.ceil(float(len(dataset)) / float(batch_size))
+        # TODO: is this the right way?
+
+        # if self.drop_remainder:
+        #     self.steps_per_epoch = math.floor(float(len(dataset)) / float(batch_size))
+        # else:
+        #     self.steps_per_epoch = math.ceil(float(len(dataset)) / float(batch_size))
+
+        self.steps_per_epoch = len(dataset)
 
         return dataset
 
