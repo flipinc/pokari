@@ -8,9 +8,9 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  # model_path: outputs/tensorflow/checkpoints/emformer_01_03.h5
+  model_path: outputs/tensorflow/checkpoints/emformer_01_04.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_warprnnt.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_05.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -20,7 +20,7 @@ trainer:
     histogram_freq: 1
     write_graph: true
     write_images: true
-    update_freq: 100
+    update_freq: 50
     profile_batch: 0
 
 spec_augment:
@@ -84,7 +84,7 @@ optimizer:
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_ratio: 0.05
-    warmup_learning_rate: 1e-6
+    warmup_learning_rate: 1e-5
 
   variational_noise:
     mean: 0
