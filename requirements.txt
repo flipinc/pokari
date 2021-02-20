@@ -20,6 +20,7 @@ tqdm
 # for tensorflow
 tensorflow-io
 tensorflow-addons
+tensorflow-datasets==4.2
 
 # for pytorch
 torch-stft

@@ -5,10 +5,10 @@
 
 ### Start with Docker
 ```shell
-docker build -t docker/tensorflow -f docker/Dockerfile .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g docker/tensorflow
+docker build -t transducer/tensorflow -f docker/Dockerfile .
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g transducer/tensorflow
 ```
-Followings installation are required after Docker run:
+Following installations are required after Docker run:
 - tensorflow-datasets==4.2.0
 - tensorflow==2.3 (for tflite conversion only)
 - tensorflow-io==0.16 (for tflite conversion only)

@@ -2,15 +2,15 @@ trainer:
   devices: [0]
   mxp: true
   run_eagerly: false
-  batch_size: 2
+  batch_size: 4
   epochs: 100
   workers: 16 # 8 cores x 2
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  model_path: outputs/tensorflow/checkpoints/emformer_01_02.h5
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_03.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_03.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_warprnnt.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -57,16 +57,21 @@ audio_feature:
   dither: 1e-5
   pad_to: 8
 
+# subword
+# text_feature:
+#   _target_: frontends.text_featurizer.SubwordFeaturizer
+#   vocabulary: null
+#   target_vocab_size: 4096
+#   max_subword_length: 20
+#   subwords_path: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
+#   subwords_corpus: # Transcript files for generating subwords
+#     - /workspace/datasets/tensorflow_asr_360.tsv
+
+# character
 text_feature:
+  _target_: frontends.text_featurizer.CharFeaturizer
   vocabulary: null
-  target_vocab_size: 4096
-  max_subword_length: 20
   blank_at_zero: true
-  beam_width: 5
-  norm_score: true
-  subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-  subwords_corpus: # Transcript files for generating subwords
-    - /workspace/datasets/tensorflow_asr_360.tsv
 
 optimizer:
   name: adam
