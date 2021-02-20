@@ -1,11 +1,9 @@
-import os
 from datetime import datetime
 
 import tensorflow as tf
 from datasets.dataset import Dataset
 from frontends.audio_featurizer import AudioFeaturizer
 from frontends.spec_augment import SpectrogramAugmentation
-from frontends.text_featurizer import SubwordFeaturizer
 from hydra.utils import instantiate
 from losses.transducer_loss import TransducerLoss
 from metrics.error_rate import ErrorRate
@@ -29,19 +27,7 @@ class Transducer(tf.keras.Model):
             **OmegaConf.to_container(cfgs.spec_augment)
         )
 
-        if cfgs.text_feature.subwords and os.path.exists(cfgs.text_feature.subwords):
-            print("Loading subwords ...")
-            self.text_featurizer = SubwordFeaturizer.load_from_file(
-                OmegaConf.to_container(cfgs.text_feature),
-                cfgs.text_feature.subwords,
-            )
-        else:
-            print("Generating subwords ...")
-            self.text_featurizer = SubwordFeaturizer.build_from_corpus(
-                OmegaConf.to_container(cfgs.text_feature),
-                cfgs.text_feature.subwords_corpus,
-            )
-            self.text_featurizer.save_to_file(cfgs.text_feature.subwords)
+        self.text_featurizer = instantiate(cfgs.text_feature)
 
         self.encoder = instantiate(cfgs.encoder)
         self.predictor = instantiate(

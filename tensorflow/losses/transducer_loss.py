@@ -2,6 +2,45 @@ import tensorflow as tf
 from tensorflow.python.keras.utils import losses_utils
 from tensorflow.python.ops.gen_array_ops import matrix_diag_part_v2
 
+try:
+    from warprnnt_tensorflow import rnnt_loss as warp_rnnt_loss
+
+    use_warprnnt = True
+except ImportError:
+    use_warprnnt = False
+
+
+def rnnt_loss(logits, labels, label_length, logit_length, blank=0, name=None):
+    if use_warprnnt:
+        return rnnt_loss_warprnnt(
+            logits=logits,
+            labels=labels,
+            label_length=label_length,
+            logit_length=logit_length,
+            blank=blank,
+        )
+    else:
+        return rnnt_loss_tf(
+            logits=logits,
+            labels=labels,
+            label_length=label_length,
+            logit_length=logit_length,
+            name=name,
+        )
+
+
+def rnnt_loss_warprnnt(logits, labels, label_length, logit_length, blank=0):
+    if not tf.config.list_physical_devices("GPU"):
+        logits = tf.nn.log_softmax(logits)
+    loss = warp_rnnt_loss(
+        acts=tf.cast(logits, tf.float32),
+        label_lengths=tf.cast(label_length, tf.int32),
+        labels=tf.cast(labels, tf.int32),
+        input_lengths=tf.cast(logit_length, tf.int32),
+        blank_label=blank,
+    )
+    return loss
+
 
 def has_gpu_or_tpu():
     gpus = tf.config.list_logical_devices("GPU")
@@ -334,7 +373,7 @@ def compute_rnnt_loss_and_grad_helper(logits, labels, label_length, logit_length
     return loss, grads_logits
 
 
-def rnnt_loss(logits, labels, label_length, logit_length, name=None):
+def rnnt_loss_tf(logits, labels, label_length, logit_length, name=None):
     name = "rnnt_loss" if name is None else name
     with tf.name_scope(name):
         logits = tf.convert_to_tensor(logits, name="logits")
