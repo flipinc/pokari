@@ -81,6 +81,7 @@ class Dataset:
 
         audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
 
+        # audiopath, audio, transcript
         return record[0], audio, record[1]
 
     def process(self, dataset, batch_size):

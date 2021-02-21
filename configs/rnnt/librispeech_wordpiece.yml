@@ -1,16 +1,16 @@
 trainer:
   devices: [0]
   mxp: true
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 100
-  workers: 16 # 8 cores x 2
+  workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 1
-  model_path: outputs/tensorflow/checkpoints/rnnt_01.h5
+  log_interval: 100
+  model_path: outputs/tensorflow/checkpoints/rnnt_01_01.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_01.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_02.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -34,9 +34,9 @@ train_ds:
   data_paths:
     - /workspace/datasets/tensorflow_asr_360.tsv
   shuffle: true
-  cache: true
+  cache: false
   buffer_size: 100
-  drop_remainder: true
+  drop_remainder: false
   num_print_sample_data: 1
 
 validation_ds:
@@ -46,7 +46,7 @@ validation_ds:
   shuffle: false
   cache: true
   buffer_size: 100
-  drop_remainder: true
+  drop_remainder: false
 
 audio_feature:
   sample_rate: 16000
@@ -58,15 +58,15 @@ audio_feature:
   pad_to: 8
 
 # text_feature:
-#   vocabulary: null
-#   target_vocab_size: 4096
-#   max_subword_length: 20
-#   blank_at_zero: true
-#   beam_width: 5
-#   norm_score: true
-#   subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-#   subwords_corpus: # Transcript files for generating subwords
-#     - /workspace/datasets/tensorflow_asr_360.tsv
+  # vocabulary: null
+  # target_vocab_size: 4096
+  # max_subword_length: 20
+  # blank_at_zero: true
+  # beam_width: 5
+  # norm_score: true
+  # subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
+  # subwords_corpus: # Transcript files for generating subwords
+  #   - /workspace/datasets/tensorflow_asr_360.tsv
 
 # character
 text_feature:
