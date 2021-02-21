@@ -17,41 +17,43 @@ class Inference:
         self.max_symbols = max_symbols
 
     def decoder_inference(
-        self, encoded_outs: tf.Tensor, predicted: tf.Tensor, states: tf.Tensor
+        self, encoded_out: tf.Tensor, prev_token: tf.Tensor, cache_states: tf.Tensor
     ):
         """Infer function for decoder
 
         Args:
             encoded_outs (tf.Tensor): output of encoder at each time step [D]
-            predicted (tf.Tensor): last character index of predicted sequence []
-            states (nested lists of tf.Tensor): states returned by rnn layers
+            prev_token (tf.Tensor): last character index of predicted sequence []
+            cache_states (nested lists of tf.Tensor): states returned by rnn layers
 
         Returns:
             (ytu, new_states)
         """
         with tf.name_scope("inference_decoder"):
-            encoded_outs = tf.reshape(encoded_outs, [1, 1, -1])  # [D] => [1, 1, D]
-            predicted = tf.reshape(predicted, [1, 1])  # [] => [1, 1]
-            y, new_states = self.predictor.stream(
-                predicted, states
+            encoded_outs = tf.reshape(encoded_out, [1, 1, -1])  # [D] => [1, 1, D]
+            prev_token = tf.reshape(prev_token, [1, 1])  # [] => [1, 1]
+            y, cache_states = self.predictor.stream(
+                prev_token, cache_states
             )  # [1, 1, P], states
             ytu = tf.nn.log_softmax(
                 self.joint([encoded_outs, y], training=False)
             )  # [1, 1, V]
             ytu = tf.reshape(ytu, shape=[-1])  # [1, 1, V] => [V]
-            return ytu, new_states
+            return ytu, cache_states
 
-    def decoder_batch_inference(self, encoded_outs, predicted, states):
+    def decoder_batch_inference(self, encoded_outs, prev_tokens, cache_states):
         """
 
         Args:
             encoded_outs: [B, 1, D]
-            predicted: [B, 1]
+            prev_tokens: [B, 1]
 
         """
         with tf.name_scope("inference_batch_decoder"):
             # [B, 1, D_p]
-            predictor_outs, states = self.predictor.stream(predicted, states)
+            predictor_outs, cache_states = self.predictor.stream(
+                prev_tokens, cache_states
+            )
             # [B, T, U, V]
             joint_outs = self.joint([encoded_outs, predictor_outs], training=False)
             # [B, 1, 1, V]
@@ -59,10 +61,14 @@ class Inference:
             # [B, V]
             ytu = ytu[:, 0, 0, :]
 
-            return ytu, states
+            return ytu, cache_states
 
     def greedy_batch_decode(
-        self, encoded_outs: tf.Tensor, encoded_lens: tf.Tensor, states: tf.Tensor = None
+        self,
+        encoded_outs: tf.Tensor,
+        encoded_lens: tf.Tensor,
+        prev_tokens: tf.Tensor = None,
+        cache_states: tf.Tensor = None,
     ):
         """Greedy batch decoding in parallel
 
@@ -73,7 +79,8 @@ class Inference:
         Args:
             encoded_outs: [B, T, D_e]
             encoded_lens: [B]
-            states: [N, 2, B, D_p]
+            prev_tokens: [B, 1]
+            cache_states: [N, 2, B, D_p]
 
         """
         bs = tf.shape(encoded_outs)[0]
@@ -86,19 +93,23 @@ class Inference:
         )
 
         # after some training iterations (usually very beginning of the
-        # first epoch), model starts to predict all blanks. So, something has to be
-        # inside labels in order to stack().
+        # first epoch), model starts to predict all blanks. So, a blank has to be
+        # inside labels in order to stack(). All blanks will be removed afterwards.
         labels = labels.write(0, tf.fill([bs], 0))
 
-        last_label = tf.fill([bs, 1], self.text_featurizer.blank)
+        last_label = (
+            prev_tokens
+            if prev_tokens is not None
+            else tf.fill([bs, 1], self.text_featurizer.blank)
+        )
 
         blank_indices = tf.fill([bs], 0)
         blank_mask = tf.fill([bs], 0)
         one = tf.constant(1, tf.int32)
         zero = tf.constant(0, tf.int32)
         states = (
-            states
-            if states is not None
+            cache_states
+            if cache_states is not None
             else self.predictor.get_initial_state(bs, False)
         )
 
@@ -106,9 +117,6 @@ class Inference:
         for t in tf.range(t_max):
             is_blank = tf.constant(0, tf.int32)
             symbols_added = tf.constant(0, tf.int32)
-
-            # mask buffers
-            blank_mask = tf.fill(tf.shape(blank_mask), 0)
 
             # Forcibly mask with "blank" tokens, for all sample where
             # current time step T > seq_len
@@ -123,8 +131,8 @@ class Inference:
                 # [B, V]
                 ytu, next_states = self.decoder_batch_inference(
                     encoded_outs=encoded_out_t,
-                    predicted=last_label,
-                    states=states,
+                    prev_tokens=last_label,
+                    cache_states=states,
                 )
 
                 symbols = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # [B]
@@ -132,10 +140,9 @@ class Inference:
                 symbol_is_blank = tf.cast(
                     symbols == self.text_featurizer.blank, tf.int32
                 )
-                # bitwise_or return [1, B] so get rid of first dim -> [B]
-                blank_mask = tf.squeeze(
-                    tf.bitwise.bitwise_or(blank_mask, symbol_is_blank),
-                )
+
+                # [B]
+                blank_mask = tf.bitwise.bitwise_or(blank_mask, symbol_is_blank)
 
                 if tf.reduce_all(tf.cast(blank_mask, tf.bool)):
                     is_blank = tf.constant(1, tf.int32)
@@ -210,12 +217,12 @@ class Inference:
         labels = tf.transpose(labels, (1, 0))
         labels = self.text_featurizer.iextract(labels)
 
-        return labels, states
+        return labels, last_label, states
 
     def greedy_naive_batch_decode(
         self,
-        encoded: tf.Tensor,
-        encoded_length: tf.Tensor,
+        encoded_outs: tf.Tensor,
+        encoded_lens: tf.Tensor,
         parallel_iterations: int = 10,
         swap_memory: bool = False,
         version: str = "v1",
@@ -223,14 +230,14 @@ class Inference:
         """
 
         Args:
-            encoded: [B, T, D]
+            encoded_outs: [B, T, D]
 
         """
         with tf.name_scope("greedy_naive_batch_decode"):
-            total_batch = tf.shape(encoded)[0]
+            total_batch = tf.shape(encoded_outs)[0]
             batch = tf.constant(0, dtype=tf.int32)
 
-            t_max = tf.math.reduce_max(encoded_length)
+            t_max = tf.math.reduce_max(encoded_lens)
 
             greedy_fn = self.greedy_decode if version == "v1" else self.greedy_decode_v2
 
@@ -247,10 +254,10 @@ class Inference:
 
             def body(batch, decoded):
                 hypothesis = greedy_fn(
-                    encoded=encoded[batch],
-                    encoded_length=encoded_length[batch],
-                    predicted=tf.constant(self.text_featurizer.blank, dtype=tf.int32),
-                    states=self.predictor.get_initial_state(batch_size=1),
+                    encoded_out=encoded_outs[batch],
+                    encoded_len=encoded_lens[batch],
+                    prev_token=tf.constant(self.text_featurizer.blank, dtype=tf.int32),
+                    cache_states=self.predictor.get_initial_state(batch_size=1),
                     parallel_iterations=parallel_iterations,
                     swap_memory=swap_memory,
                 )
@@ -275,19 +282,19 @@ class Inference:
 
     def greedy_decode(
         self,
-        encoded: tf.Tensor,
-        encoded_length: tf.Tensor,
-        predicted: tf.Tensor,
-        states: tf.Tensor,
+        encoded_out: tf.Tensor,
+        encoded_len: tf.Tensor,
+        prev_token: tf.Tensor,
+        cache_states: tf.Tensor,
         parallel_iterations: int = 10,
         swap_memory: bool = False,
     ):
         with tf.name_scope("greedy_decode"):
             time = tf.constant(0, dtype=tf.int32)
-            total = encoded_length
+            total = encoded_len
 
             hypothesis = Hypothesis(
-                index=predicted,
+                index=prev_token,
                 prediction=tf.TensorArray(
                     dtype=tf.int32,
                     size=total,
@@ -295,7 +302,7 @@ class Inference:
                     clear_after_read=False,
                     element_shape=tf.TensorShape([]),
                 ),
-                states=states,
+                states=cache_states,
             )
 
             def condition(_time, _hypothesis):
@@ -304,9 +311,9 @@ class Inference:
             def body(_time, _hypothesis):
                 ytu, _states = self.decoder_inference(
                     # avoid using [index] in tflite
-                    encoded_outs=tf.gather_nd(encoded, tf.reshape(_time, shape=[1])),
-                    predicted=_hypothesis.index,
-                    states=_hypothesis.states,
+                    encoded_out=tf.gather_nd(encoded_out, tf.reshape(_time, shape=[1])),
+                    prev_token=_hypothesis.index,
+                    cache_states=_hypothesis.states,
                 )
                 _predict = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # => argmax []
 
@@ -337,20 +344,20 @@ class Inference:
 
     def greedy_decode_v2(
         self,
-        encoded: tf.Tensor,
-        encoded_length: tf.Tensor,
-        predicted: tf.Tensor,
-        states: tf.Tensor,
+        encoded_out: tf.Tensor,
+        encoded_len: tf.Tensor,
+        prev_token: tf.Tensor,
+        cache_states: tf.Tensor,
         parallel_iterations: int = 10,
         swap_memory: bool = False,
     ):
         """ Ref: https://arxiv.org/pdf/1801.00841.pdf """
         with tf.name_scope("greedy_decode_v2"):
             time = tf.constant(0, dtype=tf.int32)
-            total = encoded_length
+            total = encoded_len
 
             hypothesis = Hypothesis(
-                index=predicted,
+                index=prev_token,
                 prediction=tf.TensorArray(
                     dtype=tf.int32,
                     size=0,
@@ -358,7 +365,7 @@ class Inference:
                     clear_after_read=False,
                     element_shape=tf.TensorShape([]),
                 ),
-                states=states,
+                states=cache_states,
             )
 
             def condition(_time, _hypothesis):
@@ -367,9 +374,9 @@ class Inference:
             def body(_time, _hypothesis):
                 ytu, _states = self.decoder_inference(
                     # avoid using [index] in tflite
-                    encoded=tf.gather_nd(encoded, tf.reshape(_time, shape=[1])),
-                    predicted=_hypothesis.index,
-                    states=_hypothesis.states,
+                    encoded_out=tf.gather_nd(encoded_out, tf.reshape(_time, shape=[1])),
+                    prev_token=_hypothesis.index,
+                    cache_states=_hypothesis.states,
                 )
                 _predict = tf.argmax(ytu, axis=-1, output_type=tf.int32)  # => argmax []
 

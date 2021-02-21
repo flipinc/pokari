@@ -6,7 +6,6 @@ import tensorflow as tf
 import tensorflow_io as tfio
 
 BUFFER_SIZE = 100
-TFRECORD_SHARDS = 16
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
@@ -124,13 +123,6 @@ class Dataset:
         )
 
         dataset = dataset.prefetch(AUTOTUNE)
-
-        # TODO: is this the right way?
-
-        # if self.drop_remainder:
-        #     self.steps_per_epoch = math.floor(float(len(dataset)) / float(batch_size))
-        # else:
-        #     self.steps_per_epoch = math.ceil(float(len(dataset)) / float(batch_size))
 
         self.steps_per_epoch = len(dataset)
 

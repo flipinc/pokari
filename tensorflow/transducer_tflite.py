@@ -8,9 +8,12 @@ tf.keras.backend.clear_session()
 
 
 def convert_to_tflite(cfgs: DictConfig):
-    transducer = Transducer(cfgs=cfgs, global_batch_size=1)
+    transducer = Transducer(cfgs=cfgs, global_batch_size=1, setup_training=False)
+    transducer._build()
 
-    tf_func = transducer.make_tflite_function()
+    transducer.load_weights(cfgs.tflite.model_path_from)
+
+    tf_func = transducer.make_one_tflite_function()
     concrete_func = tf_func.get_concrete_function()
 
     converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
@@ -28,11 +31,11 @@ def convert_to_tflite(cfgs: DictConfig):
     return tflite_model
 
 
-initialize(config_path="../configs/emformer", job_name="emformer")
+initialize(config_path="../configs/rnnt", job_name="rnnt")
 cfgs = compose(config_name="librispeech_wordpiece.yml")
 
 if __name__ == "__main__":
     tflite_model = convert_to_tflite(cfgs)
 
-    with open(cfgs.tflite.model_path, "wb") as tflite_out:
+    with open(cfgs.tflite.model_path_to, "wb") as tflite_out:
         tflite_out.write(tflite_model)

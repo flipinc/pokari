@@ -62,7 +62,7 @@ def cer(decode: np.ndarray, target: np.ndarray) -> Tuple[tf.Tensor, tf.Tensor]:
 
 
 class ErrorRate(tf.keras.metrics.Metric):
-    """ Metric for WER and CER """
+    """Metric for WER and CER"""
 
     def __init__(self, kind: str, name="error_rate", **kwargs):
         super().__init__(name=name, **kwargs)
