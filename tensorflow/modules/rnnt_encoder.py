@@ -83,13 +83,15 @@ class RNNTEncoder(tf.keras.layers.Layer):
     def stream(self, x, states):
         """Stream function for encoder network
 
+        N: a number of layers
+
         Args:
-            inputs (tf.Tensor): shape [1, T, F, C]
-            states (tf.Tensor): shape [num_lstms, 1 or 2, 1, P]
+            x (tf.Tensor): shape [1, T, n_mels]
+            states (tf.Tensor): shape [N, 2, 1, D]
 
         Returns:
             tf.Tensor: outputs with shape [1, T, E]
-            tf.Tensor: new states with shape [num_lstms, 1 or 2, 1, P]
+            tf.Tensor: new states with shape [N, 2, 1, D]
         """
         new_states = []
         for idx, block in enumerate(self.blocks):

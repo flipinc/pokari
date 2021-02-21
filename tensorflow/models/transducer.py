@@ -7,6 +7,7 @@ from frontends.spec_augment import SpectrogramAugmentation
 from hydra.utils import instantiate
 from losses.transducer_loss import TransducerLoss
 from metrics.error_rate import ErrorRate
+from mock_stream import MockStream
 from modules.inference import Inference
 from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
@@ -65,6 +66,14 @@ class Transducer(tf.keras.Model):
             joint=self.joint,
         )
         self.decoder = TransducerDecoder(labels=[], inference=self.inference)
+
+        self.mock_stream = MockStream(
+            audio_featurizer=self.audio_featurizer,
+            text_featurizer=self.text_featurizer,
+            encoder=self.encoder,
+            predictor=self.predictor,
+            inference=self.inference,
+        )
 
         self.wer = ErrorRate(kind="wer")
         self.cer = ErrorRate(kind="cer")
@@ -211,9 +220,13 @@ class Transducer(tf.keras.Model):
         if training:
             audio_features = self.spec_augment(audio_features)
 
+        # [B, T, D_e]
         encoded_outs, encoded_lens = self.encoder(audio_features, audio_lens)
+
+        # [B, U, D_p]
         decoded_outs = self.predictor(targets, target_lens)
 
+        # [B, T, U, D_j]
         logits = self.joint([encoded_outs, decoded_outs])
 
         return {
@@ -329,22 +342,24 @@ class Transducer(tf.keras.Model):
 
         return tensorboard_logs
 
-    # TODO: this function is not implemented for new APIs yet
-    # @tf.function
-    # def stream(
-    #     self,
-    #     features: tf.Tensor,
-    #     input_length: tf.Tensor,
-    #     parallel_iterations: int = 10,
-    #     swap_memory: bool = True,
-    # ):
-    #     encoded, _ = self.encoder.stream(features, self.encoder.get_initial_state())
-    #     return self.inference.greedy_naive_batch_decode(
-    #         encoded,
-    #         input_length,
-    #         parallel_iterations=parallel_iterations,
-    #         swap_memory=swap_memory,
-    #     )
+    def stream(
+        self,
+        audio_signals: tf.Tensor,
+        enable_graph: bool = False,
+    ):
+        """Mock streaming by segmenting an audio into chunks
+
+        Args:
+            audio_signals: Audio signal without batch dimension [T]
+            enable_graph: Enable graph mode and hide intermediate print outputs
+
+        """
+        if enable_graph:
+            self.fn = tf.function(self.mock_stream)
+        else:
+            self.fn = self.mock_stream
+
+        return self.fn(audio_signals)
 
     def stream_one_tflite(
         self, audio_signals, predicted, cache_encoder_states, cache_predictor_states
