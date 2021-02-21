@@ -8,7 +8,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  model_path: outputs/tensorflow/checkpoints/rnnt_01_01.h5
+  model_path: outputs/tensorflow/checkpoints/rnnt_char.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_02.h5
     save_best_only: true
@@ -111,4 +111,5 @@ joint:
   activation: tanh
 
 tflite:
-  model_path: tflites/rnnt.tflite
+  model_path_from: outputs/tensorflow/checkpoints/rnnt_char.h5
+  model_path_to: tflites/rnnt_char.tflite

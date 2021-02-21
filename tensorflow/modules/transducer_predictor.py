@@ -1,5 +1,7 @@
 import tensorflow as tf
 
+from modules.embedding import Embedding
+
 
 class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
@@ -24,9 +26,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
 
-        # mask_zero=True <= does this make any difference at training time? if not this
-        # should be included because apparently this improves inference accuracy
-        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim)
+        self.embed = Embedding(num_classes, embed_dim)
 
         self.rnns = []
         for i in range(num_layers):
@@ -48,9 +48,9 @@ class TransducerPredictor(tf.keras.layers.Layer):
             [N, 2, B, D]
 
         """
-        states = tf.TensorArray(
-            size=self.num_layers, dtype=self.dtype, clear_after_read=True
-        )
+        # returning tf.TensorArray().stack() does not work for tensorflow 2.3
+        # during build
+        states = []
 
         if self.random_state_sampling and training:
             for idx in range(self.num_layers):
@@ -63,7 +63,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
-                states = states.write(idx, state)
+                states.append(state)
 
         else:
             for idx in range(self.num_layers):
@@ -76,9 +76,9 @@ class TransducerPredictor(tf.keras.layers.Layer):
                     dtype=self.dtype,
                 )
                 state = tf.stack([h, c], axis=0)
-                states = states.write(idx, state)
+                states.append(state)
 
-        return states.stack()
+        return tf.stack(states, axis=0)
 
     def call(self, targets, target_lens, training=False):
         """

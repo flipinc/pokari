@@ -1,14 +1,19 @@
+import os
 from datetime import datetime
 
+import librosa
+import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
+import tensorflow_io as tfio
 from datasets.dataset import Dataset
 from frontends.audio_featurizer import AudioFeaturizer
 from frontends.spec_augment import SpectrogramAugmentation
 from hydra.utils import instantiate
 from losses.transducer_loss import TransducerLoss
 from metrics.error_rate import ErrorRate
-from mock_stream import MockStream
 from modules.inference import Inference
+from modules.mock_stream import MockStream
 from modules.transducer_decoder import TransducerDecoder
 from omegaconf import DictConfig, OmegaConf
 
@@ -18,6 +23,7 @@ class Transducer(tf.keras.Model):
         self,
         cfgs: DictConfig,
         global_batch_size: int,
+        setup_training: bool = True,
     ):
         super().__init__()
 
@@ -38,28 +44,6 @@ class Transducer(tf.keras.Model):
             cfgs.joint, num_classes=self.text_featurizer.num_classes
         )
 
-        self.mxp_enabled = cfgs.trainer.mxp
-        self.log_interval = cfgs.trainer.log_interval
-        self.step_counter = 0
-
-        (
-            train_dl,
-            train_steps_per_epoch,
-            val_dl,
-            val_steps_per_epoch,
-        ) = self.configure_datasets(
-            cfgs.train_ds, cfgs.validation_ds, global_batch_size
-        )
-
-        optimizer = self.configure_optimizer(
-            optim_cfg=cfgs.optimizer,
-            total_steps=train_steps_per_epoch * cfgs.trainer.epochs,
-        )
-
-        loss = TransducerLoss(
-            blank=self.text_featurizer.blank, global_batch_size=global_batch_size
-        )
-
         self.inference = Inference(
             text_featurizer=self.text_featurizer,
             predictor=self.predictor,
@@ -67,44 +51,70 @@ class Transducer(tf.keras.Model):
         )
         self.decoder = TransducerDecoder(labels=[], inference=self.inference)
 
-        self.mock_stream = MockStream(
-            audio_featurizer=self.audio_featurizer,
-            text_featurizer=self.text_featurizer,
-            encoder=self.encoder,
-            predictor=self.predictor,
-            inference=self.inference,
-        )
+        # since in tensorflow 2.3 keras.metrics are registered as layers, models that
+        # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
+        # it is better to just disable all training logics when they are unused
+        if setup_training:
+            self.mxp_enabled = cfgs.trainer.mxp
+            self.log_interval = cfgs.trainer.log_interval
+            self.step_counter = 0
 
-        self.wer = ErrorRate(kind="wer")
-        self.cer = ErrorRate(kind="cer")
+            (
+                train_dl,
+                train_steps_per_epoch,
+                val_dl,
+                val_steps_per_epoch,
+            ) = self.configure_datasets(
+                cfgs.train_ds, cfgs.validation_ds, global_batch_size
+            )
 
-        self.compile_args = {
-            "optimizer": optimizer,
-            "loss": loss,
-            "run_eagerly": cfgs.trainer.run_eagerly,
-        }
+            optimizer = self.configure_optimizer(
+                optim_cfg=cfgs.optimizer,
+                total_steps=train_steps_per_epoch * cfgs.trainer.epochs,
+            )
 
-        now = datetime.now().strftime("%Y%m%d-%H%M%S")
+            loss = TransducerLoss(
+                blank=self.text_featurizer.blank, global_batch_size=global_batch_size
+            )
 
-        tensorboard_cfg = OmegaConf.to_container(cfgs.trainer.tensorboard)
-        tensorboard_cfg.update({"log_dir": tensorboard_cfg["log_dir"] + now})
+            self.mock_stream = MockStream(
+                audio_featurizer=self.audio_featurizer,
+                text_featurizer=self.text_featurizer,
+                encoder=self.encoder,
+                predictor=self.predictor,
+                inference=self.inference,
+            )
 
-        self.fit_args = {
-            "x": train_dl,
-            "validation_data": val_dl,
-            "steps_per_epoch": train_steps_per_epoch,
-            "validation_steps": val_steps_per_epoch,
-            "epochs": cfgs.trainer.epochs,
-            "workers": cfgs.trainer.workers,
-            "max_queue_size": cfgs.trainer.max_queue_size,
-            "use_multiprocessing": cfgs.trainer.use_multiprocessing,
-            "callbacks": [
-                tf.keras.callbacks.ModelCheckpoint(
-                    **OmegaConf.to_container(cfgs.trainer.checkpoint)
-                ),
-                tf.keras.callbacks.TensorBoard(**tensorboard_cfg),
-            ],
-        }
+            self.wer = ErrorRate(kind="wer")
+            self.cer = ErrorRate(kind="cer")
+
+            self.compile_args = {
+                "optimizer": optimizer,
+                "loss": loss,
+                "run_eagerly": cfgs.trainer.run_eagerly,
+            }
+
+            now = datetime.now().strftime("%Y%m%d-%H%M%S")
+
+            tensorboard_cfg = OmegaConf.to_container(cfgs.trainer.tensorboard)
+            tensorboard_cfg.update({"log_dir": tensorboard_cfg["log_dir"] + now})
+
+            self.fit_args = {
+                "x": train_dl,
+                "validation_data": val_dl,
+                "steps_per_epoch": train_steps_per_epoch,
+                "validation_steps": val_steps_per_epoch,
+                "epochs": cfgs.trainer.epochs,
+                "workers": cfgs.trainer.workers,
+                "max_queue_size": cfgs.trainer.max_queue_size,
+                "use_multiprocessing": cfgs.trainer.use_multiprocessing,
+                "callbacks": [
+                    tf.keras.callbacks.ModelCheckpoint(
+                        **OmegaConf.to_container(cfgs.trainer.checkpoint)
+                    ),
+                    tf.keras.callbacks.TensorBoard(**tensorboard_cfg),
+                ],
+            }
 
     def configure_datasets(
         self,
@@ -112,31 +122,26 @@ class Transducer(tf.keras.Model):
         val_ds_cfg: DictConfig,
         global_batch_size: int,
     ):
-        train_ds = Dataset(
+        self.train_ds = Dataset(
             audio_featurizer=self.audio_featurizer,
             text_featurizer=self.text_featurizer,
             **OmegaConf.to_container(train_ds_cfg),
         )
-        train_dl = train_ds.create(global_batch_size)
-        train_steps_per_epoch = train_ds.steps_per_epoch
+        train_dl = self.train_ds.create(global_batch_size)
+        train_steps_per_epoch = self.train_ds.steps_per_epoch
 
-        val_ds = Dataset(
+        self.val_ds = Dataset(
             audio_featurizer=self.audio_featurizer,
             text_featurizer=self.text_featurizer,
             **OmegaConf.to_container(val_ds_cfg),
         )
-        val_dl = val_ds.create(global_batch_size)
-        val_steps_per_epoch = val_ds.steps_per_epoch
+        val_dl = self.val_ds.create(global_batch_size)
+        val_steps_per_epoch = self.val_ds.steps_per_epoch
 
         return train_dl, train_steps_per_epoch, val_dl, val_steps_per_epoch
 
     def configure_optimizer(self, optim_cfg: DictConfig, total_steps: int):
-        """Configure optimizer
-
-        TODO: support weight decay. the value of weight decay must be decayed too!
-            https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/AdamW
-
-        """
+        """Configure optimizer"""
         optim_cfg = OmegaConf.to_container(optim_cfg)
 
         self.gradient_clip_val = (
@@ -169,10 +174,16 @@ class Transducer(tf.keras.Model):
         optimizer_type = optim_cfg.pop("name")
         if optimizer_type == "adam":
             optimizer = tf.keras.optimizers.Adam(lr, **optim_cfg)
+        elif optimizer_type == "adamw":
+            # TODO: For weight decay, the value of weight decay must be decayed too!
+            # https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/AdamW
+            optimizer = tfa.optimizers.AdamW(learning_rate=lr, **optim_cfg)
         else:
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
         if self.mxp_enabled:
+            # TFLite conversion does not work for tf version 2.4 and RTX3090 training
+            # does not work for tf version 2.3
             if "2.3" in tf.__version__:
                 optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
                     optimizer, "dynamic"
@@ -300,7 +311,7 @@ class Transducer(tf.keras.Model):
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
 
-            results, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
+            results, _, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
 
             tf.print("❓ PRED: \n", results[0])
             tf.print(
@@ -344,48 +355,95 @@ class Transducer(tf.keras.Model):
 
     def stream(
         self,
-        audio_signals: tf.Tensor,
+        manifest_idx: tf.Tensor,
         enable_graph: bool = False,
     ):
         """Mock streaming by segmenting an audio into chunks
 
         Args:
-            audio_signals: Audio signal without batch dimension [T]
+            manifest_idx: Audio & transcript pair to use for mock streaming
             enable_graph: Enable graph mode and hide intermediate print outputs
 
         """
+        audio_path, trascript = self.train_ds.entries[manifest_idx]
+        audio_signal, native_rate = librosa.load(
+            os.path.expanduser(audio_path.decode("utf-8")),
+            sr=None,
+            mono=True,
+            dtype=np.float32,
+        )
+        audio_signal = tf.convert_to_tensor(audio_signal)
+        audio_signal = tfio.audio.resample(
+            audio_signal,
+            rate_in=tf.cast(native_rate, dtype=tf.int64),
+            rate_out=self.audio_featurizer.sample_rate,
+        )
+
         if enable_graph:
             self.fn = tf.function(self.mock_stream)
         else:
             self.fn = self.mock_stream
 
-        return self.fn(audio_signals)
+        return self.fn(audio_signal)
 
-    def stream_one_tflite(
-        self, audio_signals, predicted, cache_encoder_states, cache_predictor_states
+    def stream_batch_tflite(
+        self, audio_signals, prev_tokens, cache_encoder_states, cache_predictor_states
     ):
-        """Streaming tflite model for batch size = 1
-
-        TODO: Add batch_size as an argument and if its one, implement the following.
-
-        """
-        audio_signals = tf.expand_dims(audio_signals, axis=0)  # add batch dim
         audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
         audio_features, _ = self.audio_featurizer.tf_extract(audio_signals, audio_lens)
 
-        with tf.name_scope(f"{self.name}_encoder"):
-            encoded_outs, cache_encoder_states = self.encoder.stream(
-                audio_features, cache_encoder_states
-            )
-            encoded_outs = tf.squeeze(encoded_outs, axis=0)  # remove batch dim
+        encoded_outs, cache_encoder_states = self.encoder.stream(
+            audio_features, cache_encoder_states
+        )
+
+        (
+            predictions,
+            prev_tokens,
+            cache_predictor_states,
+        ) = self.inference.greedy_batch_decode(
+            encoded_outs=encoded_outs,
+            encoded_lens=tf.shape(encoded_outs)[1],
+            prev_tokens=prev_tokens,
+            cache_states=cache_predictor_states,
+        )
+
+        transcripts = self.text_featurizer.indices2upoints(predictions)
+
+        return transcripts, prev_tokens, cache_encoder_states, cache_predictor_states
+
+    def stream_one_tflite(
+        self, audio_signal, prev_token, cache_encoder_states, cache_predictor_states
+    ):
+        """Streaming tflite model for batch size = 1
+
+        Args:
+            audio_signal: [T]
+            prev_token: [1]
+            cache_encoder_states: size depends on encoder type
+            cache_predictor_states: [N, 2, B, D_p]
+
+        """
+        audio_signal = tf.expand_dims(audio_signal, axis=0)  # add batch dim
+        audio_len = tf.expand_dims(tf.shape(audio_signal)[1], axis=0)
+        audio_feature, _ = self.audio_featurizer.tf_extract(audio_signal, audio_len)
+
+        encoded_out, cache_encoder_states = self.encoder.stream(
+            audio_feature, cache_encoder_states
+        )
+        encoded_out = tf.squeeze(encoded_out, axis=0)  # remove batch dim
 
         hypothesis = self.inference.greedy_decode(
-            encoded_outs, tf.shape(encoded_outs)[0], predicted, cache_predictor_states
+            encoded_out=encoded_out,
+            encoded_len=tf.shape(encoded_out)[0],
+            prev_token=prev_token,
+            cache_states=cache_predictor_states,
         )
+
         transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
+
         return transcript, hypothesis.index, cache_encoder_states, hypothesis.states
 
-    def make_tflite_function(self):
+    def make_one_tflite_function(self):
         return tf.function(
             self.stream_one_tflite,
             input_signature=[

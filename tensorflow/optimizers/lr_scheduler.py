@@ -8,8 +8,10 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         learning_rate,
         total_steps,
         warmup_learning_rate=0.0,
-        warmup_ratio=0,
-        hold_base_rate_steps=0,
+        warmup_steps=0,
+        warmup_ratio=None,
+        hold_base_steps=0,
+        hold_base_ratio=None,
     ):
         """Cosine decay schedule with warm up period.
         Args:
@@ -17,7 +19,7 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
             total_steps: total number of training steps.
             warmup_learning_rate: initial learning rate for warm up.
             warmup_steps: number of warmup steps.
-            hold_base_rate_steps: Optional number of steps to hold base learning rate
+            hold_base_steps: Optional number of steps to hold base learning rate
                 before decaying.
 
         """
@@ -26,8 +28,16 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         self.learning_rate_base = learning_rate
         self.total_steps = total_steps
         self.warmup_learning_rate = warmup_learning_rate
-        self.warmup_steps = int(total_steps * warmup_ratio)
-        self.hold_base_rate_steps = hold_base_rate_steps
+        self.warmup_steps = (
+            int(total_steps * warmup_ratio)
+            if warmup_ratio is not None
+            else warmup_steps
+        )
+        self.hold_base_steps = (
+            int(total_steps * hold_base_ratio)
+            if hold_base_ratio is not None
+            else hold_base_steps
+        )
 
     def __call__(self, global_step):
         learning_rate = (
@@ -40,18 +50,16 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
                     * (
                         tf.cast(global_step, tf.float32)
                         - self.warmup_steps
-                        - self.hold_base_rate_steps
+                        - self.hold_base_steps
                     )
-                    / float(
-                        self.total_steps - self.warmup_steps - self.hold_base_rate_steps
-                    )
+                    / float(self.total_steps - self.warmup_steps - self.hold_base_steps)
                 )
             )
         )
 
-        if self.hold_base_rate_steps > 0:
+        if self.hold_base_steps > 0:
             learning_rate = tf.where(
-                global_step > self.warmup_steps + self.hold_base_rate_steps,
+                global_step > self.warmup_steps + self.hold_base_steps,
                 learning_rate,
                 self.learning_rate_base,
             )
