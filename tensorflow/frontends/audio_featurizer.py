@@ -29,11 +29,6 @@ class AudioFeaturizer:
         self.n_fft = n_fft or 2 ** math.ceil(math.log2(self.win_length))
         self.pad_to = pad_to
 
-    @property
-    def shape(self) -> list:
-        # None for time dimension
-        return [None, self.n_mels, 1]
-
     def extract(self, signal: np.ndarray) -> np.ndarray:
         signal = np.asfortranarray(signal)
         features = self.tf_extract(tf.convert_to_tensor(signal, dtype=tf.float32))
@@ -99,6 +94,7 @@ class AudioFeaturizer:
         del log_mel_spectrograms
 
         # normalize if required
+        # TODO: use following mask for efficient calculation
         if self.normalize_type is not None:
             x = self.normalize(x, audio_lens)
 

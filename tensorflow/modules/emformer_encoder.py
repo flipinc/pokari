@@ -547,7 +547,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. loop over layers.
         for layer in self.layers:
-            x, _ = layer(x, mask)
+            x = layer(x, mask)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
@@ -604,9 +604,9 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         # 2. apply mask and softmax
         if mask is not None:
-            attn_scores = tf.where(mask, attn_scores, float("-inf"))
+            attn_scores = tf.where(mask, float("-inf"), attn_scores)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs = tf.where(mask, attn_probs, 0.0)
+            attn_probs = tf.where(mask, 0.0, attn_probs)
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
         attn_probs = self.attn_dropout(attn_probs)
@@ -631,7 +631,7 @@ class EmformerBlock(tf.keras.layers.Layer):
 
     def stream(
         self,
-        input: tf.Tensor,
+        x: tf.Tensor,
         cache_k: tf.Tensor,
         cache_v: tf.Tensor,
     ):
@@ -645,21 +645,21 @@ class EmformerBlock(tf.keras.layers.Layer):
         N: number of layers
 
         Args:
-            input (tf.Tensor): [B, C+R, D]
+            x (tf.Tensor): [B, C+R, D]
             cache_k (tf.Tensor): [N, B, H, L, D/H]
             cache_v (tf.Tensor): [N, B, H, L, D/H]
         """
-        bs = tf.shape(input)[0]
+        bs = tf.shape(x)[0]
 
         # 1. apply layer norm
-        input = self.ln_in(input)
+        x = self.ln_in(x)
 
         # 2. calculate q -> [B, H, C+R, D]
-        q = tf.reshape(self.linear_q(input), (bs, -1, self.num_heads, self.d_k))
+        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, (0, 2, 1, 3))
 
         # 3. calculate k and v -> [B, H, L+C+R, D]
-        k_cr = tf.reshape(self.linear_k(input), (bs, -1, self.num_heads, self.d_k))
+        k_cr = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
         # we need to include previous cache as left length can extend beyond chunk.
         k = tf.concat([cache_k, k_cr], axis=1)
         new_cache_k = k[
@@ -667,20 +667,20 @@ class EmformerBlock(tf.keras.layers.Layer):
         ]
         k = tf.transpose(k, (0, 2, 1, 3))
 
-        v_cr = tf.reshape(self.linear_v(input), (bs, -1, self.num_heads, self.d_k))
+        v_cr = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
         v = tf.concat([cache_v, v_cr], axis=1)
         new_cache_v = v[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
         v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(input, q, k, v)
+        output = self.attend(x, q, k, v)
 
         return output, (new_cache_k, new_cache_v)
 
     def call(
         self,
-        input: tf.Tensor,
+        x: tf.Tensor,
         mask: tf.Tensor,
     ):
         """
@@ -689,25 +689,25 @@ class EmformerBlock(tf.keras.layers.Layer):
         R: number of right contexts in one chunk
 
         Args:
-            input (tf.Tensor): [B, Total_R+Tmax, D]
+            x (tf.Tensor): [B, Total_R+Tmax, D]
             mask (tf.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
 
         Returns:
             tf.Tensor: [B, Total_R+Tmax, D]
         """
-        bs = tf.shape(input)[0]
+        bs = tf.shape(x)[0]
 
         # 1. perform layer norm
-        input = self.ln_in(input)
+        x = self.ln_in(x)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
-        q = tf.reshape(self.linear_q(input), (bs, -1, self.num_heads, self.d_k))
-        k = tf.reshape(self.linear_k(input), (bs, -1, self.num_heads, self.d_k))
-        v = tf.reshape(self.linear_v(input), (bs, -1, self.num_heads, self.d_k))
+        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
+        k = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
+        v = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, [0, 2, 1, 3])
         k = tf.transpose(k, [0, 2, 1, 3])
         v = tf.transpose(v, [0, 2, 1, 3])
 
-        output = self.attend(input, q, k, v, mask)
+        x = self.attend(x, q, k, v, mask)
 
-        return output, None
+        return x
