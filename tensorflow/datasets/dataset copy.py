@@ -22,11 +22,6 @@ class Dataset:
         num_print_sample_data: int = 0,
         **kwargs,
     ):
-        """
-
-        Args:
-
-        """
         self.audio_featurizer = audio_featurizer
         self.text_featurizer = text_featurizer
         self.data_paths = data_paths
@@ -76,11 +71,13 @@ class Dataset:
     @staticmethod
     def load(record: tf.Tensor):
         def fn(path: bytes):
+            # wave, rate = librosa.load(
+            #     os.path.expanduser(path.decode("utf-8")), sr=None, mono=True
+            # )
             wave, rate = librosa.load(
                 os.path.expanduser(path.decode("utf-8")), sr=16000, mono=True
             )
-            wave = tf.expand_dims(wave, axis=-1)  # add channel dim
-            wave = tf.audio.encode_wav(wave, sample_rate=rate)
+            wave = tf.audio.encode_wav(tf.expand_dims(wave, axis=-1), sample_rate=rate)
             return wave.numpy()
 
         audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
@@ -135,7 +132,18 @@ class Dataset:
 
     @tf.function
     def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
+        # def tf_read_raw_audio(audio: tf.Tensor, sample_rate=16000):
+        #     wave, rate = tf.audio.decode_wav(
+        #         audio, desired_channels=1, desired_samples=-1
+        #     )
+        #     # resampled = tfio.audio.resample(
+        #     #     wave, rate_in=tf.cast(rate, dtype=tf.int64), rate_out=sample_rate
+        #     # )
+        #     return tf.reshape(wave, shape=[-1])  # reshape for using tf.signal
+
         with tf.device("/CPU:0"):
+            # audio_signal = tf_read_raw_audio(audio, self.audio_featurizer.sample_rate)
+
             audio_signal, _ = tf.audio.decode_wav(
                 audio, desired_channels=1, desired_samples=-1
             )

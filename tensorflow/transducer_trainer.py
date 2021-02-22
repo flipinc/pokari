@@ -6,7 +6,7 @@ from models.transducer import Transducer
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/rnnt", job_name="rnnt")
+    initialize(config_path="../configs/emformer", job_name="emformer")
     cfgs = compose(config_name="librispeech_wordpiece.yml")
 
     tf.config.optimizer.set_experimental_options(
@@ -28,6 +28,7 @@ if __name__ == "__main__":
         transducer._build()
 
         if "model_path" in cfgs.trainer:
+            print(f"Loading from {cfgs.trainer.model_path} ...")
             transducer.load_weights(cfgs.trainer.model_path)
 
         transducer._compile()
