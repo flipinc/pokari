@@ -27,7 +27,6 @@ class AudioFeaturizer:
         self.n_mels = n_mels
         self.normalize_type = normalize_type
         self.n_fft = n_fft or 2 ** math.ceil(math.log2(self.win_length))
-        self.pad_to = pad_to
 
     @property
     def shape(self) -> list:
@@ -40,12 +39,6 @@ class AudioFeaturizer:
         return features.numpy()
 
     def tf_extract(self, audio_signals, audio_lens):
-        """
-
-        ref: https://medium.com/swlh/
-        how-to-run-gpu-accelerated-signal-processing-in-tensorflow-13e1633f4bfb
-
-        """
         x = audio_signals
         del audio_signals
 
@@ -67,16 +60,17 @@ class AudioFeaturizer:
 
         # [B, T, nfft/2]
         # TODO: is there tensorflow version of torch.cuda.amp.autocast(enabled=False)?
-        stfts = tf.signal.stft(
-            x,
-            frame_length=self.win_length,
-            frame_step=self.hop_length,
-            fft_length=self.n_fft,
-            pad_end=True,
+        spectrograms = tf.square(
+            tf.abs(
+                tf.signal.stft(
+                    x,
+                    frame_length=self.win_length,
+                    frame_step=self.hop_length,
+                    fft_length=self.n_fft,
+                    pad_end=True,
+                )
+            )
         )
-        # stft returns real & imag, so convert to magnitude
-        # x1 for energy spectrogram, x2 for power spectrum
-        spectrograms = tf.square(tf.abs(stfts))
 
         # [nfft/2, n_mel]
         mel_weight = tf.signal.linear_to_mel_weight_matrix(
@@ -88,40 +82,48 @@ class AudioFeaturizer:
         )
 
         # mel spectrograms -> [B, T, m_mels]
-        mel_spectrograms = tf.tensordot(spectrograms, mel_weight, 1)
-        del spectrograms, mel_weight
+        x = tf.matmul(spectrograms, mel_weight)
+        del spectrograms
 
-        log_mel_spectrograms = tf.math.log(mel_spectrograms + 1e-9)
-        del mel_spectrograms
+        # power to decibel
+        x = self.power_to_db(x)
 
         # [B, n_mels, T]
-        x = tf.transpose(log_mel_spectrograms, (0, 2, 1))
-        del log_mel_spectrograms
+        x = tf.transpose(x, (0, 2, 1))
 
         # normalize if required
         if self.normalize_type is not None:
             x = self.normalize(x, audio_lens)
 
-        # mask to zero any values beyond audio_lens in batch
-        mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
-        # [B, T_max] >= [B, 1] -> [B, T_max]
-        mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
-        x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
-
-        # pad to multiple of 8 or 16 for efficient tensor core use
-        if self.pad_to > 0:
-            pad_amount = tf.shape(x)[-1] % self.pad_to
-            if pad_amount != 0:
-                x = tf.pad(
-                    x,
-                    [[0, 0], [0, 0], [0, self.pad_to - pad_amount]],
-                    constant_values=0.0,
-                )
+        # TODO: pad to multiple of 8 for efficient tensor core use
 
         # [B, T, n_mels]
         x = tf.transpose(x, (0, 2, 1))
 
         return x, audio_lens
+
+    def power_to_db(self, magnitude, ref=1.0, amin=1e-10, top_db=80.0):
+        """Conversion from power to decibels. Based off librosa's power_to_db."""
+
+        def log10(x):
+            numerator = tf.math.log(x)
+            denominator = tf.math.log(tf.constant(10, dtype=numerator.dtype))
+            return numerator / denominator
+
+        if amin <= 0:
+            raise ValueError("amin must be strictly positive")
+
+        ref_value = np.abs(ref)
+
+        x = 10.0 * log10(tf.maximum(amin, magnitude))
+        x -= 10.0 * log10(tf.maximum(amin, ref_value))
+
+        if top_db is not None:
+            if top_db < 0:
+                raise ValueError("top_db must be non-negative")
+            x = tf.maximum(x, tf.reduce_max(x) - top_db)
+
+        return x
 
     def normalize(self, x: tf.Tensor, audio_lens: tf.Tensor):
         """Normalize audio signal"""

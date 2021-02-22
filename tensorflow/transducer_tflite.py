@@ -26,8 +26,6 @@ def convert_to_tflite(cfgs: DictConfig):
 
     tflite_model = converter.convert()
 
-    print("🎉 Successfully converted to tflite model")
-
     return tflite_model
 
 
@@ -39,3 +37,5 @@ if __name__ == "__main__":
 
     with open(cfgs.tflite.model_path_to, "wb") as tflite_out:
         tflite_out.write(tflite_model)
+
+    print("🎉 Successfully converted to tflite model")
