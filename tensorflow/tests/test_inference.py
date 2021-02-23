@@ -4,7 +4,7 @@ from hydra.utils import instantiate
 from modules.inference import Inference
 
 initialize(config_path="../../configs/rnnt", job_name="rnnt")
-cfgs = compose(config_name="librispeech_wordpiece.yml")
+cfgs = compose(config_name="librispeech_char.yml")
 
 tf.random.set_seed(2)
 
