@@ -339,7 +339,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = tf.concat([mask_top, mask_bottom], axis=-2)
         mask = tf.expand_dims(mask, axis=1)
 
-        return tf.equal(mask, 0), right_indexes
+        # return tf.equal(mask, 1), right_indexes
+
+        return tf.cast(mask, tf.float32), right_indexes
 
     def np_create_mask(self, audio_lens: np.array, t_max: int):
         """Numpy implementatino of emformer attention mask"""
@@ -441,7 +443,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        return mask == 0, right_indexes
+        return mask.astype("float32"), right_indexes
+
+        # return mask == 1, right_indexes
 
     def stream(
         self,
@@ -552,6 +556,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
 
+        # tf.print("🐳", x)
+
         return x, audio_lens
 
 
@@ -584,6 +590,8 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.linear_k = tf.keras.layers.Dense(dim_model)
         self.linear_v = tf.keras.layers.Dense(dim_model)
 
+        self.softmax = tf.keras.layers.Softmax()
+
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn)
@@ -591,7 +599,7 @@ class EmformerBlock(tf.keras.layers.Layer):
 
     def attend(
         self,
-        input: tf.Tensor,
+        x: tf.Tensor,
         q: tf.Tensor,
         k: tf.Tensor,
         v: tf.Tensor,
@@ -604,18 +612,26 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         # 2. apply mask and softmax
         if mask is not None:
-            attn_scores = tf.where(mask, float("-inf"), attn_scores)
+            if self.dtype == tf.float16:
+                # for amp
+                inf_neg = tf.float16.min
+            else:
+                # using float(-inf) or -math.inf gives nan after softmax
+                inf_neg = -1e9
+
+            attn_scores += inf_neg * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs = tf.where(mask, 0.0, attn_probs)
+            attn_probs *= attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
+
         attn_probs = self.attn_dropout(attn_probs)
 
         # 3. attend and add residual
         output = tf.matmul(attn_probs, v)
         output = tf.transpose(output, [0, 2, 1, 3])
         output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
-        attn_out = output + input
+        attn_out = output + x
 
         # 4. layer norm
         output = self.ln_out_1(attn_out)
@@ -681,7 +697,7 @@ class EmformerBlock(tf.keras.layers.Layer):
     def call(
         self,
         x: tf.Tensor,
-        mask: tf.Tensor,
+        mask: tf.int32,
     ):
         """
 
@@ -690,7 +706,7 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         Args:
             x (tf.Tensor): [B, Total_R+Tmax, D]
-            mask (tf.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
+            mask (tf.int32): [B, 1, Total_R+Tmax, Total_R+Tmax]
 
         Returns:
             tf.Tensor: [B, Total_R+Tmax, D]

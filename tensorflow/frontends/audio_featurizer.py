@@ -48,7 +48,8 @@ class AudioFeaturizer:
 
         # dither
         if self.dither > 0:
-            x += self.dither * tf.random.normal(tf.shape(x))
+            # align dtype with x for amp (float16)
+            x += self.dither * tf.random.normal(tf.shape(x), dtype=x.dtype)
 
         # preemph
         if self.preemph is not None:
@@ -62,6 +63,7 @@ class AudioFeaturizer:
 
         # [B, T, nfft/2]
         # TODO: is there tensorflow version of torch.cuda.amp.autocast(enabled=False)?
+        # -> just cast x to float32 and recast back to float16
         stfts = tf.signal.stft(
             x,
             frame_length=self.win_length,

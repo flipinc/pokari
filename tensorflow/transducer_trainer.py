@@ -6,12 +6,11 @@ from models.transducer import Transducer
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/rnnt", job_name="rnnt")
+    initialize(config_path="../configs/emformer", job_name="emformer")
     cfgs = compose(config_name="librispeech_wordpiece.yml")
 
-    tf.config.optimizer.set_experimental_options(
-        {"auto_mixed_precision": cfgs.trainer.mxp}
-    )
+    # policy = tf.keras.mixed_precision.Policy(cfgs.trainer.mxp)
+    # tf.keras.mixed_precision.set_global_policy(policy)
 
     gpus = tf.config.list_physical_devices("GPU")
     if gpus:

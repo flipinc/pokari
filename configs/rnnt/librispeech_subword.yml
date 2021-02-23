@@ -1,6 +1,6 @@
 trainer:
   devices: [0]
-  mxp: true
+  mxp: mixed_float16
   run_eagerly: false
   batch_size: 4
   epochs: 100
@@ -57,22 +57,14 @@ audio_feature:
   dither: 1e-5
   pad_to: 8
 
-# text_feature:
-  # vocabulary: null
-  # target_vocab_size: 4096
-  # max_subword_length: 20
-  # blank_at_zero: true
-  # beam_width: 5
-  # norm_score: true
-  # subwords: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-  # subwords_corpus: # Transcript files for generating subwords
-  #   - /workspace/datasets/tensorflow_asr_360.tsv
-
-# character
 text_feature:
-  _target_: frontends.text_featurizer.CharFeaturizer
+_target_: frontends.text_featurizer.SubwordFeaturizer
   vocabulary: null
-  blank_at_zero: true
+  target_vocab_size: 4096
+  max_subword_length: 20
+  subwords: /workspace/datasets/4096_20.subwords
+  subwords_corpus:
+    - /workspace/datasets/tensorflow_asr_360.tsv
 
 optimizer:
   name: adam

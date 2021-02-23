@@ -97,6 +97,11 @@ class TestEmformer:
         # padding
         assert tf.math.reduce_sum(mask[0, 0, 11:14, 9:14]) == 3
 
+    def test_np_mask(self):
+        """test output of np_mask and tf_mask is equal"""
+        # TODO: simple way to compare is by
+        # tf.reduce_mean(tf.cast(tf.equal(tf_mask, np_mask), tf.float32))
+
     def test_full_context(self):
         model = instantiate(cfg)
 

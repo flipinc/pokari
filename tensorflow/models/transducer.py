@@ -55,8 +55,13 @@ class Transducer(tf.keras.Model):
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
         # it is better to just disable all training logics when they are unused
         if setup_training:
-            self.mxp_enabled = cfgs.trainer.mxp
-            self.log_interval = cfgs.trainer.log_interval
+            self.debugging = (
+                cfgs.trainer.debugging if "debugging" in cfgs.trainer else None
+            )
+            self.mxp_enabled = cfgs.trainer.mxp if "mxp" in cfgs.trainer else None
+            self.log_interval = (
+                cfgs.trainer.log_interval if "log_interval" in cfgs.trainer else None
+            )
             self.step_counter = 0
 
             (
@@ -300,13 +305,20 @@ class Transducer(tf.keras.Model):
             low = self.gradient_clip_val * -1
             gradients = [(tf.clip_by_value(grad, low, high)) for grad in gradients]
 
+        if self.debugging:
+            for grad in gradients:
+                tf.debugging.check_numerics(grad, "Gradients have invalid value!!")
+
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
         tensorboard_logs = {"loss": loss}
 
         # TODO: This code can be executed only in eager mode. so for graph mode,
         # log_interval must be > 1 for tracing to be disabled
-        if (self.step_counter + 1) % self.log_interval == 0:
+        if (
+            self.log_interval is not None
+            and (self.step_counter + 1) % self.log_interval == 0
+        ):
             labels = y_true["labels"]
             encoded_outs = y_pred["encoded_outs"]
             logit_lens = y_pred["logit_lens"]
