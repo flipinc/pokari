@@ -304,6 +304,7 @@ class Transducer(tf.keras.Model):
             gradients = [(tf.clip_by_value(grad, low, high)) for grad in gradients]
 
         if self.debugging:
+            tf.print("Checking gradients value...")
             for grad in gradients:
                 tf.debugging.check_numerics(grad, "Gradients have invalid value!!")
 
@@ -337,7 +338,7 @@ class Transducer(tf.keras.Model):
             tensorboard_logs.update({"wer": self.wer.result()})
             tensorboard_logs.update({"cer": self.cer.result()})
 
-            # Average over each interval
+            # Average over each step
             self.wer.reset_states()
             self.cer.reset_states()
 

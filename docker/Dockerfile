@@ -1,4 +1,5 @@
 # as of 2021/2/13, tensorflow/tensorflow:nightly-gpu or :latest-gpu has ome bugs related to RTX 3090 configuration
+# probably because it does not use CUDA 11.1
 FROM nvcr.io/nvidia/tensorflow:20.12-tf2-py3
 
 # install sndfile library for librosa

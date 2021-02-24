@@ -133,7 +133,6 @@ class Dataset:
 
         return dataset
 
-    @tf.function
     def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
         with tf.device("/CPU:0"):
             audio_signal, _ = tf.audio.decode_wav(

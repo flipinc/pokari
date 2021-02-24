@@ -3,10 +3,16 @@
 ![CI](https://github.com/chief-co-jp/pokari/workflows/CI/badge.svg)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-### Start with Docker
+### Start with PyTorch Docker
+```shell
+docker build -t transducer/pytorch -f docker/Dockerfile .
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g transducer/pytorch
+```
+
+### Start with Tensorflow Docker
 ```shell
 docker build -t transducer/tensorflow -f docker/Dockerfile .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g transducer/tensorflow
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=1g --ulimit memlock=-1 transducer/tensorflow
 ```
 Following installations are required after Docker run:
 - tensorflow==2.3.2 (for tflite conversion only)
