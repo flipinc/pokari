@@ -542,7 +542,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        # mask, right_indexes = self.create_mask(audio_lens, t_new)
+        # using numpy mask instead of tensorflow gives 40%+ training time reduction
         mask, right_indexes = tf.numpy_function(
             self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
         )
