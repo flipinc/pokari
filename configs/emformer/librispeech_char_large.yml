@@ -95,7 +95,6 @@ encoder:
   dropout_attn: 0.1
   subsampling: stack # frame stacking in paper
   subsampling_factor: 4
-  subsampling_dim: 256
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
   chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
   right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)

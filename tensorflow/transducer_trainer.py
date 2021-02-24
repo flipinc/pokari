@@ -7,10 +7,10 @@ tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
     initialize(config_path="../configs/emformer", job_name="emformer")
-    cfgs = compose(config_name="librispeech_char_large.yml")
+    cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
 
     if "mxp" in cfgs.trainer:
-        # TODO: support mixed precision training. All layers must be adapt to
+        # TODO: support mixed precision training. All layers must adapt to
         # mixed precision including transducer loss.
 
         # policy = tf.keras.mixed_precision.Policy(cfgs.trainer.mxp)

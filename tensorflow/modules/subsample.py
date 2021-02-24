@@ -12,7 +12,6 @@ class VggSubsample(tf.keras.layers.Layer):
         feat_in (int): size of the input features
         feat_out (int): size of the output features
         conv_channels (int): Number of channels for the convolution layers.
-        activation (Module): activation function, default is tf.nn.relu()
 
     TODO: This module is very slow in graph mode thus it is not recommend to use this.
     But works fine in eager mode.
@@ -24,8 +23,7 @@ class VggSubsample(tf.keras.layers.Layer):
         subsampling_factor: int,
         feat_in: int,
         feat_out: int,
-        conv_channels: int,
-        activation=tf.nn.relu,
+        conv_channels: int = 64,
         name: str = "vgg_subsample",
     ):
         super().__init__(name=name)
@@ -46,26 +44,27 @@ class VggSubsample(tf.keras.layers.Layer):
                 padding="valid"  # first padding is added manually
                 if i == 0
                 else "same",
+                data_format="channels_first",
+                activation="relu",
             )
-            act1 = activation
             conv2 = tf.keras.layers.Conv2D(
                 filters=conv_channels,
                 kernel_size=self.kernel_size,
                 strides=1,
                 padding="same",
+                data_format="channels_first",
+                activation="relu",
             )
-            act2 = activation
             pool = tf.keras.layers.MaxPool2D(
                 pool_size=self.pool_stride,
                 padding="same",
+                data_format="channels_first",
             )
 
             self.layers.append(
                 {
                     "conv1": conv1,
-                    "act1": act1,
                     "conv2": conv2,
-                    "act2": act2,
                     "pool": pool,
                 }
             )
@@ -86,18 +85,17 @@ class VggSubsample(tf.keras.layers.Layer):
         # 1. add padding to make this causal convolution
         x = tf.pad(x, [[0, 0], [1, 1], [self.left_padding, 0]])
 
-        # 2. add channel dimension -> [B, Tmax, D, 1]
-        x = tf.expand_dims(x, axis=-1)
+        # 2. add channel dimension -> [B, 1, Tmax, D]
+        x = tf.expand_dims(x, axis=1)
 
         # 3. forward
         for layer in self.layers:
             x = layer["conv1"](x)
-            x = layer["act1"](x)
             x = layer["conv2"](x)
-            x = layer["act2"](x)
             x = layer["pool"](x)
 
-        b, t, f, c = shape_list(x)
+        b, c, t, f = shape_list(x)
+        x = tf.transpose(x, [0, 2, 3, 1])
         x = tf.reshape(x, [b, t, f * c])
         x = self.linear_out(x)
 

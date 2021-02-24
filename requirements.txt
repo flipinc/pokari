@@ -21,6 +21,7 @@ tqdm
 tensorflow-io
 tensorflow-addons
 tensorflow-datasets==4.2
+tensorboard-plugin-profile
 
 # for pytorch
 torch-stft
