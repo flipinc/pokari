@@ -67,7 +67,7 @@ class MockStream:
             )  # add batch dim
             chunk_audio_lens = tf.constant([end_offset - start_offset])
 
-            audio_features, _ = self.audio_featurizer.tf_extract(
+            audio_features, _ = self.audio_featurizer(
                 chunk_audio_signal, chunk_audio_lens
             )
 
@@ -94,6 +94,8 @@ class MockStream:
         """
 
         For computational efficiency, multiple frames are bundled and fed to encoder.
+        10 frames are stacked as default.
+        Ref: https://arxiv.org/pdf/2010.14665.pdf
 
         Args:
             features_per_stream: number of features to be fed into encoder. Better to
@@ -118,7 +120,7 @@ class MockStream:
             )  # add batch dim
             chunk_audio_lens = tf.constant([end_offset - start_offset])
 
-            audio_features, _ = self.audio_featurizer.tf_extract(
+            audio_features, _ = self.audio_featurizer(
                 chunk_audio_signal, chunk_audio_lens
             )
 

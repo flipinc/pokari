@@ -339,9 +339,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = tf.concat([mask_top, mask_bottom], axis=-2)
         mask = tf.expand_dims(mask, axis=1)
 
-        # return tf.equal(mask, 1), right_indexes
+        # TODO: for mxp trainig, casting manually to tf.float32 will give an error
+        mask = tf.cast(mask, tf.float32)
 
-        return tf.cast(mask, tf.float32), right_indexes
+        return mask, right_indexes
 
     def np_create_mask(self, audio_lens: np.array, t_max: int):
         """Numpy implementatino of emformer attention mask"""
@@ -443,9 +444,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        return mask.astype("float32"), right_indexes
+        mask = mask.astype("float32")
 
-        # return mask == 1, right_indexes
+        return mask, right_indexes
 
     def stream(
         self,
@@ -542,7 +543,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        mask, right_indexes = self.create_mask(audio_lens, t_new)
+        # mask, right_indexes = self.create_mask(audio_lens, t_new)
+        mask, right_indexes = tf.numpy_function(
+            self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
+        )
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
@@ -555,8 +559,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
-
-        # tf.print("🐳", x)
 
         return x, audio_lens
 
@@ -612,12 +614,9 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         # 2. apply mask and softmax
         if mask is not None:
-            if self.dtype == tf.float16:
-                # for amp
-                inf_neg = tf.float16.min
-            else:
-                # using float(-inf) or -math.inf gives nan after softmax
-                inf_neg = -1e9
+            # using float(-inf) or -math.inf or -10e9 gives nan after softmax
+            # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
+            inf_neg = -1e9
 
             attn_scores += inf_neg * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)

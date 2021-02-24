@@ -1,7 +1,3 @@
-# rnnt/20210222-063801/train
-# rnnt_02_char.h5
-# trainable params: 62,051,613
-
 trainer:
   devices: [0]
   run_eagerly: false
@@ -10,21 +6,22 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 100
-  # model_path: outputs/tensorflow/checkpoints/rnnt_02_char.h5
+  log_interval: null
+  model_path: outputs/tensorflow/checkpoints/emformer_02_char_pred.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char_00.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/rnnt/
+    log_dir: outputs/tensorflow/logs/emformer/
     histogram_freq: 1
     write_graph: true
     write_images: true
     update_freq: 50
     profile_batch: 0
+  debugging: false
 
 spec_augment:
   freq_masks: 2
@@ -70,10 +67,12 @@ optimizer:
   learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
+
+  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_ratio: 0.05
+    warmup_steps: 40000
     warmup_learning_rate: 1e-6
     hold_base_ratio: 0.6
 
@@ -83,25 +82,31 @@ optimizer:
     start_step: -1
 
 encoder:
-  _target_: modules.rnnt_encoder.RNNTEncoder
-  dim_model: 320
-  num_units: 1024
-  num_layers: 8
-  reduction_indices: [0, 1]
-  reduction_factors: [3, 2]
+  _target_: modules.emformer_encoder.EmformerEncoder
+  feat_in: *n_mels
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
+  num_heads: 8
+  dim_model: 512
+  dim_ffn: 2048
+  dropout_attn: 0.1
+  subsampling: vgg # frame stacking in paper
+  subsampling_factor: 4
+  subsampling_dim: 256
+  left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
+  chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
+  right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor
-  num_layers: 2
-  embed_dim: 320
-  dim_model: 1024
+  num_layers: 2 # 2 in paper
+  embed_dim: 256 # 256 in paper
+  dim_model: 512 # 512 in paper
   random_state_sampling: true
 
 joint:
   _target_: modules.transducer_joint.TransducerJoint
-  dim_model: 320
+  dim_model: 640 # 640 in paper
   activation: tanh
 
 tflite:
-  model_path_from: outputs/tensorflow/checkpoints/rnnt_char.h5
-  model_path_to: tflites/rnnt_char.tflite
+  model_path_to: tflites/emformer.tflite
