@@ -59,10 +59,8 @@ class TestEmformer:
         input_len = 7  # actual length
 
         audio_lens = tf.constant([input_len])
-        mask, right_indexes = model.create_mask(audio_lens=audio_lens, t_max=t_max)
 
-        # adjust format
-        mask = tf.where(mask == tf.constant(True, tf.bool), 0, 1)
+        mask, right_indexes = model.create_mask(audio_lens=audio_lens, t_max=t_max)
 
         # 1. number of copied right indexes should match.
         # num_chunks(3) * right_length(2) - trim_last_space(1) = 5
@@ -99,8 +97,29 @@ class TestEmformer:
 
     def test_np_mask(self):
         """test output of np_mask and tf_mask is equal"""
-        # TODO: simple way to compare is by
-        # tf.reduce_mean(tf.cast(tf.equal(tf_mask, np_mask), tf.float32))
+        model = instantiate(cfg, left_length=2, chunk_length=3, right_length=2)
+
+        t_max = 10  # padded length
+        input_len = 7  # actual length
+
+        audio_lens = tf.constant([input_len])
+
+        tf_mask, tf_right_indexes = model.create_mask(
+            audio_lens=audio_lens, t_max=t_max
+        )
+        np_mask, np_right_indexes = model.np_create_mask(
+            audio_lens=audio_lens.numpy(), t_max=t_max
+        )
+        np_mask = tf.convert_to_tensor(np_mask)
+        np_right_indexes = tf.convert_to_tensor(np_right_indexes)
+
+        assert tf.reduce_mean(tf.cast(tf.equal(tf_mask, np_mask), tf.float32)) == 1
+        assert (
+            tf.reduce_mean(
+                tf.cast(tf.equal(tf_right_indexes, np_right_indexes), tf.float32)
+            )
+            == 1
+        )
 
     def test_full_context(self):
         model = instantiate(cfg)

@@ -228,9 +228,7 @@ class Transducer(tf.keras.Model):
         target_lens = inputs["target_lens"]
 
         # [B, T, n_mels]
-        audio_features, audio_lens = self.audio_featurizer.tf_extract(
-            audio_signals, audio_lens
-        )
+        audio_features, audio_lens = self.audio_featurizer(audio_signals, audio_lens)
 
         # [B, T, n_mels]
         if training:
@@ -402,7 +400,7 @@ class Transducer(tf.keras.Model):
         self, audio_signals, prev_tokens, cache_encoder_states, cache_predictor_states
     ):
         audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
-        audio_features, _ = self.audio_featurizer.tf_extract(audio_signals, audio_lens)
+        audio_features, _ = self.audio_featurizer(audio_signals, audio_lens)
 
         encoded_outs, cache_encoder_states = self.encoder.stream(
             audio_features, cache_encoder_states
@@ -437,7 +435,7 @@ class Transducer(tf.keras.Model):
         """
         audio_signal = tf.expand_dims(audio_signal, axis=0)  # add batch dim
         audio_len = tf.expand_dims(tf.shape(audio_signal)[1], axis=0)
-        audio_feature, _ = self.audio_featurizer.tf_extract(audio_signal, audio_len)
+        audio_feature, _ = self.audio_featurizer(audio_signal, audio_len)
 
         encoded_out, cache_encoder_states = self.encoder.stream(
             audio_feature, cache_encoder_states

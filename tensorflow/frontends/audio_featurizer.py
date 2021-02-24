@@ -4,7 +4,34 @@ import numpy as np
 import tensorflow as tf
 
 
-class AudioFeaturizer:
+class STFT(tf.keras.layers.Layer):
+    """Short time fourier transform
+
+    TODO: STFT can be only run in float32. In the future, when support for mixed
+    precision is added, stft must be separeted so it can run in float32
+
+    """
+
+    def __init__(self, win_length, hop_length, n_fft, name="stft"):
+        super().__init__(name=name, dtype=tf.float32)
+
+        self.win_length = win_length
+        self.hop_length = hop_length
+        self.n_fft = n_fft
+
+    def call(self, x):
+        x = tf.signal.stft(
+            x,
+            frame_length=self.win_length,
+            frame_step=self.hop_length,
+            fft_length=self.n_fft,
+            pad_end=True,
+        )
+
+        return x
+
+
+class AudioFeaturizer(tf.keras.layers.Layer):
     def __init__(
         self,
         sample_rate: int = 16000,
@@ -18,7 +45,10 @@ class AudioFeaturizer:
         # followings are to used in the future
         pad_to: int = 8,
         pad_value: int = 0,
+        name="audio_featurizer",
     ):
+        super().__init__(name=name)
+
         self.sample_rate = sample_rate
         self.win_length = int(window_size * sample_rate)
         self.hop_length = int(window_stride * sample_rate)
@@ -29,18 +59,18 @@ class AudioFeaturizer:
         self.n_fft = n_fft or 2 ** math.ceil(math.log2(self.win_length))
         self.pad_to = pad_to
 
+        self.stft = STFT(
+            win_length=self.win_length,
+            hop_length=self.hop_length,
+            n_fft=self.n_fft,
+        )
+
     def extract(self, signal: np.ndarray) -> np.ndarray:
         signal = np.asfortranarray(signal)
-        features = self.tf_extract(tf.convert_to_tensor(signal, dtype=tf.float32))
+        features = self(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
-    def tf_extract(self, audio_signals, audio_lens):
-        """
-
-        ref: https://medium.com/swlh/
-        how-to-run-gpu-accelerated-signal-processing-in-tensorflow-13e1633f4bfb
-
-        """
+    def call(self, audio_signals, audio_lens):
         x = audio_signals
         del audio_signals
 
@@ -62,15 +92,8 @@ class AudioFeaturizer:
             )
 
         # [B, T, nfft/2]
-        # TODO: is there tensorflow version of torch.cuda.amp.autocast(enabled=False)?
-        # -> just cast x to float32 and recast back to float16
-        stfts = tf.signal.stft(
-            x,
-            frame_length=self.win_length,
-            frame_step=self.hop_length,
-            fft_length=self.n_fft,
-            pad_end=True,
-        )
+        stfts = self.stft(x)
+
         # stft returns real & imag, so convert to magnitude
         # x1 for energy spectrogram, x2 for power spectrum
         spectrograms = tf.square(tf.abs(stfts))
@@ -106,7 +129,7 @@ class AudioFeaturizer:
         mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
         x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
 
-        # pad to multiple of 8 or 16 for efficient tensor core use
+        # pad to multiple of pad_to for efficient tensor core use
         if self.pad_to > 0:
             pad_amount = tf.shape(x)[-1] % self.pad_to
             if pad_amount != 0:

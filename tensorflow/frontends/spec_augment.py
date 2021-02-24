@@ -14,7 +14,13 @@ class SpectrogramAugmentation:
     time_width - maximum number of time steps to be cut in one segment.
     """
 
-    def __init__(self, freq_masks=0, time_masks=0, freq_width=10, time_width=10):
+    def __init__(
+        self,
+        freq_masks=0,
+        time_masks=0,
+        freq_width=10,
+        time_width=10,
+    ):
         self.freq_mask = FreqencyMask(num_masks=freq_masks, mask_width=freq_width)
         self.time_mask = TimeMask(num_masks=time_masks, mask_width=time_width)
 

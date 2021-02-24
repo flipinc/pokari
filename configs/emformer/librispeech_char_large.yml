@@ -1,16 +1,19 @@
+# emformer/20210224-031814/train
+# trainable params: 79,528,733
+# used tensorflow mask for encoder
+
 trainer:
   devices: [0]
-  mxp: mixed_float16
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 100
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 1
-  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mask.h5
+  log_interval: null
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mask.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mask.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_large.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -58,17 +61,6 @@ audio_feature:
   dither: 1e-5
   pad_to: 8
 
-# subword
-# text_feature:
-#   _target_: frontends.text_featurizer.SubwordFeaturizer
-#   vocabulary: null
-#   target_vocab_size: 4096
-#   max_subword_length: 20
-#   subwords_path: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-#   subwords_corpus: # Transcript files for generating subwords
-#     - /workspace/datasets/tensorflow_asr_360.tsv
-
-# character
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
   vocabulary: null
@@ -96,7 +88,7 @@ optimizer:
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
   feat_in: *n_mels
-  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 26 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
@@ -110,14 +102,14 @@ encoder:
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor
-  num_layers: 1 # 2 in paper
-  embed_dim: 320 # 256 in paper
-  dim_model: 320 # 512 in paper
+  num_layers: 2 # 2 in paper
+  embed_dim: 256 # 256 in paper
+  dim_model: 512 # 512 in paper
   random_state_sampling: true
 
 joint:
   _target_: modules.transducer_joint.TransducerJoint
-  dim_model: 320 # 640 in paper
+  dim_model: 640 # 640 in paper
   activation: tanh
 
 tflite:
