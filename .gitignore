@@ -5,7 +5,6 @@ __pycache__
 .pytest_cache
 
 # tensorflow related
-temps
 outputs
 tflites
 

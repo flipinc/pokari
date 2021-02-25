@@ -16,6 +16,8 @@ class VggSubsample(tf.keras.layers.Layer):
     TODO: This module is very slow in graph mode thus it is not recommend to use this.
     But works fine in eager mode.
 
+    Note: Conv2D on CPU does not support NCHW format
+
     """
 
     def __init__(
@@ -24,6 +26,7 @@ class VggSubsample(tf.keras.layers.Layer):
         feat_in: int,
         feat_out: int,
         conv_channels: int = 64,
+        data_format: str = "channels_first",
         name: str = "vgg_subsample",
     ):
         super().__init__(name=name)
@@ -36,6 +39,8 @@ class VggSubsample(tf.keras.layers.Layer):
         self.pool_stride = 2
         self.pool_kernel_size = 2
 
+        self.data_format = data_format
+
         self.layers = []
         for i in range(self.sampling_num):
             conv1 = tf.keras.layers.Conv2D(
@@ -45,22 +50,22 @@ class VggSubsample(tf.keras.layers.Layer):
                 padding="valid"  # first padding is added manually
                 if i == 0
                 else "same",
-                data_format="channels_first",
                 activation="relu",
+                data_format=data_format,
             )
             conv2 = tf.keras.layers.Conv2D(
                 filters=conv_channels,
                 kernel_size=self.kernel_size,
                 strides=1,
                 padding="same",
-                data_format="channels_first",
                 activation="relu",
+                data_format=data_format,
             )
             pool = tf.keras.layers.MaxPool2D(
                 pool_size=self.pool_kernel_size,
                 strides=self.pool_stride,
                 padding="same",
-                data_format="channels_first",
+                data_format=data_format,
             )
 
             self.layers.append(
@@ -85,10 +90,14 @@ class VggSubsample(tf.keras.layers.Layer):
             [B, Tmax, D]
         """
         # 1. add padding to make this causal convolution
-        x = tf.pad(x, [[0, 0], [1, 1], [self.left_padding, 0]])
+        x = tf.pad(x, [[0, 0], [self.left_padding, 0], [1, 1]])
 
-        # 2. add channel dimension -> [B, 1, Tmax, D]
-        x = tf.expand_dims(x, axis=1)
+        if self.data_format == "channels_first":
+            # 2.1 add channel dimension -> [B, 1, Tmax, D]
+            x = tf.expand_dims(x, axis=1)
+        else:
+            # 2.2 add channel dimension -> [B, Tmax, D, 1]
+            x = tf.expand_dims(x, axis=-1)
 
         # 3. forward
         for layer in self.layers:
@@ -96,8 +105,10 @@ class VggSubsample(tf.keras.layers.Layer):
             x = layer["conv2"](x)
             x = layer["pool"](x)
 
-        b, c, t, f = shape_list(x)
-        x = tf.transpose(x, [0, 2, 3, 1])
+        if self.data_format == "channels_first":
+            x = tf.transpose(x, (0, 2, 3, 1))
+
+        b, t, f, c = shape_list(x)
         x = tf.reshape(x, [b, t, f * c])
         x = self.linear_out(x)
 

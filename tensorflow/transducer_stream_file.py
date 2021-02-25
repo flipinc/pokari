@@ -1,10 +1,17 @@
-from datasets.dataset import Dataset
+from hydra.experimental import compose, initialize
+
+import tensorflow as tf
 from models.transducer import Transducer
 
-# get audiopath and transcript
+tf.keras.backend.clear_session()
 
-# get audio
-Dataset.load()
+if __name__ == "__main__":
+    initialize(config_path="../configs/emformer", job_name="rnnt")
+    cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
 
-# stream audio
-Transducer.stream_one()
+    transducer = Transducer(cfgs=cfgs, global_batch_size=1)
+    transducer._build()
+
+    transducer.load_weights(cfgs.trainer.model_path)
+
+    transducer.stream()

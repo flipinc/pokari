@@ -4,7 +4,6 @@ import librosa
 import numpy as np
 import tensorflow as tf
 
-BUFFER_SIZE = 100
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
@@ -18,7 +17,7 @@ class Dataset:
         cache: bool = False,
         shuffle: bool = False,
         drop_remainder: bool = True,
-        buffer_size: int = BUFFER_SIZE,
+        buffer_size: int = 100,
         num_print_sample_data: int = 0,
         **kwargs,
     ):
@@ -68,8 +67,9 @@ class Dataset:
 
         self.entries = np.array(self.entries)
 
-        if self.shuffle:
-            np.random.shuffle(self.entries)  # Mix transcripts.tsv
+        # TODO: Delete this? Dataset is already being shuffled in tf.data.Dataset
+        # if self.shuffle:
+        #     np.random.shuffle(self.entries)  # Mix transcripts.tsv
 
         self.steps_per_epoch = len(self.entries)
 

@@ -6,8 +6,8 @@ from models.transducer import Transducer
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/rnnt", job_name="rnnt")
-    cfgs = compose(config_name="librispeech_char.yml")
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
 
     if "mxp" in cfgs.trainer:
         # TODO: support mixed precision training. All layers must adapt to
