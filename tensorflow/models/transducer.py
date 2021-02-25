@@ -5,7 +5,6 @@ import librosa
 import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
-import tensorflow_io as tfio
 from datasets.dataset import Dataset
 from frontends.audio_featurizer import AudioFeaturizer
 from frontends.spec_augment import SpectrogramAugmentation
@@ -369,28 +368,31 @@ class Transducer(tf.keras.Model):
 
     def stream(
         self,
-        manifest_idx: tf.Tensor,
+        manifest_idx: int = 0,
         enable_graph: bool = False,
     ):
-        """Mock streaming by segmenting an audio into chunks
+        """Mock streaming on CPU by segmenting an audio into chunks
 
         Args:
-            manifest_idx: Audio & transcript pair to use for mock streaming
+            manifest_idx: Audio path and transcript pair to use for mock streaming.
             enable_graph: Enable graph mode and hide intermediate print outputs
 
         """
-        audio_path, trascript = self.train_ds.entries[manifest_idx]
+        path, transcript = self.train_ds.entries[manifest_idx]
+        tf.print(f"🎙 Using {path}...")
+
         audio_signal, native_rate = librosa.load(
-            os.path.expanduser(audio_path.decode("utf-8")),
-            sr=None,
+            os.path.expanduser(path),
+            sr=self.audio_featurizer.sample_rate,
             mono=True,
             dtype=np.float32,
         )
         audio_signal = tf.convert_to_tensor(audio_signal)
-        audio_signal = tfio.audio.resample(
-            audio_signal,
-            rate_in=tf.cast(native_rate, dtype=tf.int64),
-            rate_out=self.audio_featurizer.sample_rate,
+        transcript = tf.strings.unicode_encode(
+            self.text_featurizer.indices2upoints(
+                tf.strings.to_number(tf.strings.split(transcript), out_type=tf.int32)
+            ),
+            output_encoding="UTF-8",
         )
 
         if enable_graph:
@@ -398,7 +400,9 @@ class Transducer(tf.keras.Model):
         else:
             self.fn = self.mock_stream
 
-        return self.fn(audio_signal)
+        self.fn(audio_signal)
+
+        tf.print("💎: ", transcript)
 
     def stream_batch_tflite(
         self, audio_signals, prev_tokens, cache_encoder_states, cache_predictor_states
@@ -439,7 +443,9 @@ class Transducer(tf.keras.Model):
         """
         audio_signal = tf.expand_dims(audio_signal, axis=0)  # add batch dim
         audio_len = tf.expand_dims(tf.shape(audio_signal)[1], axis=0)
-        audio_feature, _ = self.audio_featurizer(audio_signal, audio_len)
+        audio_feature, _ = self.audio_featurizer(
+            audio_signal, audio_len, training=False, inference=True
+        )
 
         encoded_out, cache_encoder_states = self.encoder.stream(
             audio_feature, cache_encoder_states

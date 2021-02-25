@@ -99,6 +99,7 @@ encoder:
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
   chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
   right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
+  mode: stream
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor

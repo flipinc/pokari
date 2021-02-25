@@ -70,7 +70,9 @@ class AudioFeaturizer(tf.keras.layers.Layer):
         features = self(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
-    def call(self, audio_signals, audio_lens):
+    def call(
+        self, audio_signals, audio_lens, training: bool = False, inference: bool = False
+    ):
         x = audio_signals
         del audio_signals
 
@@ -119,18 +121,18 @@ class AudioFeaturizer(tf.keras.layers.Layer):
         del log_mel_spectrograms
 
         # normalize if required
-        # TODO: use following mask for efficient calculation
         if self.normalize_type is not None:
             x = self.normalize(x, audio_lens)
 
         # mask to zero any values beyond audio_lens in batch
-        mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
-        # [B, T_max] >= [B, 1] -> [B, T_max]
-        mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
-        x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
+        if not inference:
+            mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
+            # [B, T_max] >= [B, 1] -> [B, T_max]
+            mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
+            x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
 
         # pad to multiple of pad_to for efficient tensor core use
-        if self.pad_to > 0:
+        if training and self.pad_to > 0:
             pad_amount = tf.shape(x)[-1] % self.pad_to
             if pad_amount != 0:
                 x = tf.pad(

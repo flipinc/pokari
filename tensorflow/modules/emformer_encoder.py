@@ -21,9 +21,16 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        mode: str = "full_context",
         name: str = "emformer_encoder",
     ):
         super().__init__(name=name)
+
+        if mode == "stream":
+            print(
+                "🚄 Running Emformer in stream mode. If this is unintentional, please "
+                "turn `mode` to `full_context` because some optimizations will be lost!"
+            )
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
@@ -51,6 +58,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 feat_in=feat_out,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
+                data_format="channels_last" if mode == "stream" else "channels_first",
                 name=f"{self.name}_vgg_subsample",
             )
 
@@ -495,10 +503,12 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 )
             ),
         )
+
         for i, layer in enumerate(self.layers):
             x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
             new_cache_k = new_cache_k.write(i, temp_cache_k)
             new_cache_v = new_cache_v.write(i, temp_cache_v)
+
         new_cache_k = new_cache_k.stack()
         new_cache_v = new_cache_v.stack()
         new_cache = tf.stack([new_cache_k, new_cache_v], axis=0)
@@ -591,8 +601,6 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.linear_k = tf.keras.layers.Dense(dim_model)
         self.linear_v = tf.keras.layers.Dense(dim_model)
 
-        self.softmax = tf.keras.layers.Softmax()
-
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn)
@@ -605,6 +613,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         k: tf.Tensor,
         v: tf.Tensor,
         mask: tf.Tensor = None,
+        training: bool = False,
     ):
         bs = tf.shape(q)[0]
 
@@ -623,7 +632,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
-        attn_probs = self.attn_dropout(attn_probs)
+        attn_probs = self.attn_dropout(attn_probs, training=training)
 
         # 3. attend and add residual
         output = tf.matmul(attn_probs, v)
@@ -651,10 +660,14 @@ class EmformerBlock(tf.keras.layers.Layer):
     ):
         """
         Note: At inference time, the notion of Left, Chunk, Right contexts still exists
-            because without them, the compatibility with training will be lost.
-            For example, at training time, the output for t_0, t_1, t_2 is determined
-            by the input of t_0, t_1, t_2 PLUS right contexts.
-            This must be the case for inference too.
+        because without them, the compatibility with training will be lost.
+        For example, at training time, the output for t_0, t_1, t_2 is determined by
+        the input of t_0, t_1, t_2 PLUS right contexts. This must be the case for
+        inference too.
+
+        Note: Only a part of chunk context is cached as next left context. Right context
+        cannot be cached because, at training time, right context at layer n is
+        calculated based on current segment (not previous segment).
 
         N: number of layers
 
@@ -669,11 +682,13 @@ class EmformerBlock(tf.keras.layers.Layer):
         x = self.ln_in(x)
 
         # 2. calculate q -> [B, H, C+R, D]
-        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
+        q = self.linear_q(x)
+        q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, (0, 2, 1, 3))
 
         # 3. calculate k and v -> [B, H, L+C+R, D]
-        k_cr = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
+        k = self.linear_k(x)
+        k_cr = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
         # we need to include previous cache as left length can extend beyond chunk.
         k = tf.concat([cache_k, k_cr], axis=1)
         new_cache_k = k[
@@ -681,14 +696,15 @@ class EmformerBlock(tf.keras.layers.Layer):
         ]
         k = tf.transpose(k, (0, 2, 1, 3))
 
-        v_cr = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
+        v = self.linear_v(x)
+        v_cr = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
         v = tf.concat([cache_v, v_cr], axis=1)
         new_cache_v = v[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
         v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(x, q, k, v)
+        output = self.attend(x, q, k, v, training=False)
 
         return output, (new_cache_k, new_cache_v)
 
@@ -696,6 +712,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         self,
         x: tf.Tensor,
         mask: tf.int32,
+        training: bool,
     ):
         """
 
@@ -715,13 +732,16 @@ class EmformerBlock(tf.keras.layers.Layer):
         x = self.ln_in(x)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
-        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
-        k = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
-        v = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
+        q = self.linear_q(x)
+        k = self.linear_k(x)
+        v = self.linear_v(x)
+        q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
+        k = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
+        v = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, [0, 2, 1, 3])
         k = tf.transpose(k, [0, 2, 1, 3])
         v = tf.transpose(v, [0, 2, 1, 3])
 
-        x = self.attend(x, q, k, v, mask)
+        x = self.attend(x, q, k, v, mask, training)
 
         return x
