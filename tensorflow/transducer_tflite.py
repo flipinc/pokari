@@ -29,8 +29,8 @@ def convert_to_tflite(cfgs: DictConfig):
     return tflite_model
 
 
-initialize(config_path="../configs/rnnt", job_name="rnnt")
-cfgs = compose(config_name="librispeech_wordpiece.yml")
+initialize(config_path="../configs/emformer", job_name="emformer")
+cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
 
 if __name__ == "__main__":
     tflite_model = convert_to_tflite(cfgs)

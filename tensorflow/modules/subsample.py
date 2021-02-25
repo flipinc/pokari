@@ -76,7 +76,7 @@ class VggSubsample(tf.keras.layers.Layer):
     def calc_length(self, audio_lens: tf.int32):
         return tf.cast(tf.math.ceil(audio_lens / self.pool_stride), tf.int32)
 
-    def call(self, x: tf.Tensor, audio_lens: tf.int32):
+    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None):
         """
         Args:
             x (torch.Tensor): [B, Tmax, D]
@@ -101,12 +101,15 @@ class VggSubsample(tf.keras.layers.Layer):
         x = tf.reshape(x, [b, t, f * c])
         x = self.linear_out(x)
 
-        # 4. calculate new length
-        # TODO: improve the performance of length calculation
-        for i in tf.range(self.sampling_num):
-            audio_lens = tf.map_fn(self.calc_length, audio_lens)
+        if audio_lens is not None:
+            # 4. calculate new length
+            # TODO: improve the performance of length calculation
+            for i in tf.range(self.sampling_num):
+                audio_lens = tf.map_fn(self.calc_length, audio_lens)
 
-        return x, audio_lens
+            return x, audio_lens
+        else:
+            return x
 
 
 class StackSubsample(tf.keras.layers.Layer):
