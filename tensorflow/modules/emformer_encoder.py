@@ -451,7 +451,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        mask = mask.astype("float32")
+        mask = tf.convert_to_tensor(mask, tf.float32)
 
         return mask, right_indexes
 
@@ -477,40 +477,14 @@ class EmformerEncoder(tf.keras.layers.Layer):
         x = self.subsample(x)
 
         # 3. loop over layers while saving cache at the same time
-        new_cache_k = tf.TensorArray(
-            self.dtype,
-            size=len(self.layers),
-            clear_after_read=True,
-            element_shape=tf.TensorShape(
-                (
-                    None,  # batch size
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                )
-            ),
-        )
-        new_cache_v = tf.TensorArray(
-            self.dtype,
-            size=len(self.layers),
-            clear_after_read=True,
-            element_shape=tf.TensorShape(
-                (
-                    None,  # batch size
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                )
-            ),
-        )
-
+        new_cache_k = new_cache_v = []
         for i, layer in enumerate(self.layers):
             x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
-            new_cache_k = new_cache_k.write(i, temp_cache_k)
-            new_cache_v = new_cache_v.write(i, temp_cache_v)
+            new_cache_k.append(temp_cache_k)
+            new_cache_v.append(temp_cache_v)
 
-        new_cache_k = new_cache_k.stack()
-        new_cache_v = new_cache_v.stack()
+        new_cache_k = tf.stack(new_cache_k, axis=0)
+        new_cache_v = tf.stack(new_cache_v, axis=0)
         new_cache = tf.stack([new_cache_k, new_cache_v], axis=0)
 
         # 4. Trim right context
@@ -531,7 +505,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
             ]
         )
 
-    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32):
+    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool):
         """
 
         D_1: number of mels. This number has to match D_2 after frame stacking
@@ -626,9 +600,9 @@ class EmformerBlock(tf.keras.layers.Layer):
             # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
             inf_neg = -1e9
 
-            attn_scores += inf_neg * (1.0 - mask)
+            attn_scores += inf_neg * (1.0 - mask)  # make sure softmax avoids mask
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs *= attn_probs * mask
+            attn_probs = tf.math.multiply(attn_probs, mask)  # zero out completely
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
