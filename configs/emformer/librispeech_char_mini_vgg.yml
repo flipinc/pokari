@@ -113,4 +113,5 @@ joint:
   activation: tanh
 
 tflite:
-  model_path_to: tflites/emformer.tflite
+  model_path_from: outputs/tensorflow-done/checkpoints/emformer_03_char_mini_vgg.h5
+  model_path_to: tflites/emformer_char_mini_vgg.tflite
