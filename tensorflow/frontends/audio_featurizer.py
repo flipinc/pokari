@@ -73,6 +73,12 @@ class AudioFeaturizer(tf.keras.layers.Layer):
     def call(
         self, audio_signals, audio_lens, training: bool = False, inference: bool = False
     ):
+        """
+
+        Returns:
+            tf.Tensor: batch audio features [B, T, n_mels]
+            tf.int32: btach audio lengths [B]
+        """
         x = audio_signals
         del audio_signals
 
