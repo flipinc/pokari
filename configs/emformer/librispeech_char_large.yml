@@ -1,7 +1,3 @@
-# emformer/20210224-031814/train
-# trainable params: 79,528,733
-# used tensorflow mask for encoder
-
 trainer:
   devices: [0]
   run_eagerly: false

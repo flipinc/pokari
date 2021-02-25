@@ -219,6 +219,9 @@ class Transducer(tf.keras.Model):
         super(Transducer, self).fit(**self.fit_args)
 
     def _compile(self):
+        if self.log_interval == 1 and self.compile_args["run_eagerly"] is False:
+            raise ValueError("Logging with Graph mode is not supported")
+
         super(Transducer, self).compile(**self.compile_args)
 
     def call(self, inputs, training=False):
