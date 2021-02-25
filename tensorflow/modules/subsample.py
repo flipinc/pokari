@@ -34,6 +34,7 @@ class VggSubsample(tf.keras.layers.Layer):
         self.left_padding = self.kernel_size - 1
 
         self.pool_stride = 2
+        self.pool_kernel_size = 2
 
         self.layers = []
         for i in range(self.sampling_num):
@@ -56,7 +57,8 @@ class VggSubsample(tf.keras.layers.Layer):
                 activation="relu",
             )
             pool = tf.keras.layers.MaxPool2D(
-                pool_size=self.pool_stride,
+                pool_size=self.pool_kernel_size,
+                strides=self.pool_stride,
                 padding="same",
                 data_format="channels_first",
             )
@@ -71,8 +73,8 @@ class VggSubsample(tf.keras.layers.Layer):
 
         self.linear_out = tf.keras.layers.Dense(feat_out)
 
-    def calc_length(self, in_length: tf.Tensor):
-        return tf.cast(tf.math.ceil(in_length / self.pool_stride), tf.int32)
+    def calc_length(self, audio_lens: tf.int32):
+        return tf.cast(tf.math.ceil(audio_lens / self.pool_stride), tf.int32)
 
     def call(self, x: tf.Tensor, audio_lens: tf.int32):
         """
