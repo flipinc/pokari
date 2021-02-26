@@ -211,27 +211,40 @@ class BaseModel(tf.keras.Model):
         else:
             gradients = tape.gradient(loss, self.trainable_weights)
 
-        # TODO: variational noise (gaussian noise) is does not work. Copy simulate()
-        # in pytorch implementation
-
+        # add variational noise for better generalization to out-of-domain data
+        # ref: https://arxiv.org/pdf/2005.03271v1.pdf
+        # TODO: make this work in train_step. currently since auto-graph is set to
+        # false (see the comment at `train_step`), this script does not work
         # if self.variational_noise_cfg is not None:
-        #     start_step = self.variational_noise_cfg.pop("start_step")
+        #     start_step = self.variational_noise_cfg["start_step"]
 
         #     if tf.equal(start_step, -1):
         #         start_step = self.warmup_steps
 
         #     if tf.less_equal(start_step, self.step_counter):
-        #         gradients = [
-        #             tf.add(
-        #                 grad,
-        #                 tf.random.normal(
-        #                     tf.shape(grad),
-        #                     **self.variational_noise_cfg,
-        #                     dtype=grad.dtype,
-        #                 ),
+        #         new_gradients = []
+
+        #         for grad in gradients:
+        #             values = tf.convert_to_tensor(
+        #                 grad.values if isinstance(grad, tf.IndexedSlices) else grad
         #             )
-        #             for grad in gradients
-        #         ]
+
+        #             noise = tf.random.normal(
+        #                 tf.shape(values),
+        #                 mean=self.variational_noise_cfg.get("mean", 0),
+        #                 stddev=self.variational_noise_cfg.get("stddev", 0.05),
+        #                 dtype=values.dtype,
+        #             )
+        #             values = tf.add(grad, noise)
+
+        #             if isinstance(grad, tf.IndexedSlices):
+        #                 values = tf.IndexedSlices(
+        #                     values, grad.indices, grad.dense_shape
+        #                 )
+
+        #             new_gradients.append(values)
+
+        #         gradients = new_gradients
 
         if self.gradient_clip_val is not None:
             high = self.gradient_clip_val

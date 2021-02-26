@@ -16,6 +16,10 @@ class TransducerPredictor(tf.keras.layers.Layer):
     ):
         """
 
+        Args:
+            random_state_sampling: RSS proves to improve model accuracy when seen
+            out of domain data (https://arxiv.org/pdf/2005.03271v1.pdf)
+
         TODO: tensorflow_addons's LSTMLayerNorm is too slow. putting layernorm layer
             after lstm layer substantially increases speed and accuracy. Why?
 
