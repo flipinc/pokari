@@ -67,10 +67,6 @@ class Dataset:
 
         self.entries = np.array(self.entries)
 
-        # TODO: Delete this? Dataset is already being shuffled in tf.data.Dataset
-        if self.shuffle:
-            np.random.shuffle(self.entries)  # Mix transcripts.tsv
-
         self.steps_per_epoch = len(self.entries)
 
     @staticmethod
@@ -133,6 +129,7 @@ class Dataset:
 
         return dataset
 
+    @tf.function
     def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
         with tf.device("/CPU:0"):
             audio_signal, _ = tf.audio.decode_wav(

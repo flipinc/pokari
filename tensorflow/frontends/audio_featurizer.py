@@ -100,7 +100,14 @@ class AudioFeaturizer(tf.keras.layers.Layer):
             )
 
         # [B, T, nfft/2]
-        stfts = self.stft(x)
+        # stfts = self.stft(x)
+        stfts = tf.signal.stft(
+            x,
+            frame_length=self.win_length,
+            frame_step=self.hop_length,
+            fft_length=self.n_fft,
+            pad_end=True,
+        )
 
         # stft returns real & imag, so convert to magnitude
         # x1 for energy spectrogram, x2 for power spectrum
