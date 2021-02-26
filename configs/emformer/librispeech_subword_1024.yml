@@ -91,7 +91,6 @@ optimizer:
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
-  feat_in: *n_mels
   num_layers: 16 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512

@@ -28,7 +28,6 @@ class CTCDecoder(tf.keras.layers.Layer):
         Returns:
             tf.Tensor: [B, T, num_classes]
         """
-        x = self.conv(encoded_outs)
-        logits = tf.nn.log_softmax(x, axis=-1)
+        logits = self.conv(encoded_outs)
 
         return logits

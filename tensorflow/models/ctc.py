@@ -49,6 +49,7 @@ class CTC(BaseModel):
         # [B, T, D_e]
         encoded_outs, encoded_lens = self.encoder(audio_features, audio_lens)
 
+        # [B, T, num_classes]
         logits = self.decoder(encoded_outs=encoded_outs)
 
         return {"logits": logits, "logit_lens": encoded_lens}

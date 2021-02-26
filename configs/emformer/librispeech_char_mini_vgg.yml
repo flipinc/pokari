@@ -14,9 +14,9 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  # model_path: outputs/tensorflow-done/checkpoints/emformer_03_char_mini_vgg.h5
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_vgg_3.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_1.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_4.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -88,13 +88,12 @@ optimizer:
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
-  feat_in: *n_mels
   num_layers: 18 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
-  subsampling: vgg # frame stacking in paper
+  subsampling: stack # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
