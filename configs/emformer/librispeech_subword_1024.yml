@@ -1,3 +1,6 @@
+base_model:
+  _target_: models.transducer.Transducer
+
 trainer:
   devices: [0]
   run_eagerly: false

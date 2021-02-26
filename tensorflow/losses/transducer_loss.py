@@ -10,6 +10,29 @@ except ImportError:
     use_warprnnt = False
 
 
+class TransducerLoss(tf.keras.losses.Loss):
+    def __init__(
+        self,
+        blank=0,
+        global_batch_size=None,
+        reduction=losses_utils.ReductionV2.NONE,
+        name=None,
+    ):
+        super().__init__(reduction=reduction, name=name)
+        self.blank = blank
+        self.global_batch_size = global_batch_size
+
+    def call(self, y_true, y_pred):
+        logits = y_pred["logits"]
+        logit_length = y_pred["logit_lens"]
+        labels = y_true["labels"]
+        label_length = y_true["label_lens"]
+        loss = rnnt_loss(logits, labels, label_length, logit_length)
+        return tf.nn.compute_average_loss(
+            loss, global_batch_size=self.global_batch_size
+        )
+
+
 def rnnt_loss(logits, labels, label_length, logit_length, blank=0, name=None):
     if use_warprnnt:
         return rnnt_loss_warprnnt(
@@ -51,30 +74,6 @@ def has_gpu_or_tpu():
 
 
 use_cpu = not has_gpu_or_tpu()
-
-
-class TransducerLoss(tf.keras.losses.Loss):
-    def __init__(
-        self,
-        blank=0,
-        global_batch_size=None,
-        reduction=losses_utils.ReductionV2.NONE,
-        name=None,
-    ):
-        super(TransducerLoss, self).__init__(reduction=reduction, name=name)
-        self.blank = blank
-        self.global_batch_size = global_batch_size
-
-    def call(self, y_true, y_pred):
-        logits = y_pred["logits"]
-        logit_length = y_pred["logit_lens"]
-        labels = y_true["labels"]
-        label_length = y_true["label_lens"]
-        loss = rnnt_loss(logits, labels, label_length, logit_length)
-        return tf.nn.compute_average_loss(
-            loss, global_batch_size=self.global_batch_size
-        )
-
 
 LOG_0 = float("-inf")
 

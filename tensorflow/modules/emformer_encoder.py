@@ -451,6 +451,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.expand_dims(mask, axis=1)
 
         mask = tf.convert_to_tensor(mask, tf.float32)
+        right_indexes = tf.convert_to_tensor(right_indexes, tf.int32)
 
         return mask, right_indexes
 
