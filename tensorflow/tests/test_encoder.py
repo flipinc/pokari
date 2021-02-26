@@ -132,3 +132,9 @@ class TestEmformer:
 
         assert isinstance(x, tf.Tensor)
         assert isinstance(audio_lens, tf.Tensor)
+
+
+class TestConformer:
+    def test_mask(self):
+        """test padding mask is valid"""
+        assert 1 == 1

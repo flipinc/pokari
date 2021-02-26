@@ -1,12 +1,12 @@
 from hydra.experimental import compose, initialize
+from hydra.utils import instantiate
 
 import tensorflow as tf
-from models.transducer import Transducer
 
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/conformer", job_name="conformer")
+    initialize(config_path="../configs/emformer_ctc", job_name="emformer_ctc")
     cfgs = compose(config_name="librispeech_char.yml")
 
     if "mxp" in cfgs.trainer:
@@ -28,12 +28,14 @@ if __name__ == "__main__":
         global_batch_size = cfgs.trainer.batch_size
         global_batch_size *= strategy.num_replicas_in_sync
 
-        transducer = Transducer(cfgs=cfgs, global_batch_size=global_batch_size)
-        transducer._build()
+        model = instantiate(
+            cfgs.base_model, cfgs=cfgs, global_batch_size=global_batch_size
+        )
+        model._build()
 
         if "model_path" in cfgs.trainer:
             print(f"Loading from {cfgs.trainer.model_path} ...")
-            transducer.load_weights(cfgs.trainer.model_path)
+            model.load_weights(cfgs.trainer.model_path)
 
-        transducer._compile()
-        transducer._fit()
+        model._compile()
+        model._fit()
