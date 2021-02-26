@@ -9,7 +9,6 @@ from modules.subsample import StackSubsample, VggSubsample
 class EmformerEncoder(tf.keras.layers.Layer):
     def __init__(
         self,
-        feat_in: int,
         num_layers: int,
         num_heads: int,
         dim_model: int,
@@ -505,7 +504,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
             ]
         )
 
-    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool):
+    def call(
+        self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = False
+    ):
         """
 
         D_1: number of mels. This number has to match D_2 after frame stacking
@@ -538,7 +539,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. loop over layers.
         for layer in self.layers:
-            x = layer(x, mask)
+            x = layer(x, mask, training)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
@@ -600,12 +601,11 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         # 2. apply mask and softmax
         if mask is not None:
-            # using float(-inf) or -math.inf or -10e9 gives nan after softmax
+            # using float(-inf) or -math.inf gives nan after softmax
             # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
-            inf_neg = -10e9
-
-            attn_scores += inf_neg * (1.0 - mask)  # make sure softmax avoids mask
+            attn_scores += -1e9 * (1.0 - mask)  # make sure softmax avoids mask
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
+            attn_probs = attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
@@ -689,7 +689,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         self,
         x: tf.Tensor,
         mask: tf.int32,
-        training: bool,
+        training: bool = False,
     ):
         """
 

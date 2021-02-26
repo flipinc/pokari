@@ -16,6 +16,16 @@ from models.base_model import BaseModel
 
 
 class Transducer(BaseModel):
+    """
+
+    Some training tips about transducer model:
+    - RNN encoder may end up with lower loss than transducer but higher CER/WER
+    ref: https://github.com/espnet/espnet/issues/2606
+    - For transducer models and CTC modesl, the first phase of learning is to learn all
+    blanks.
+
+    """
+
     def __init__(
         self,
         cfgs: DictConfig,
