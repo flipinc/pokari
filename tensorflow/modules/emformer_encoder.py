@@ -55,7 +55,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
         elif self.subsampling == "vgg":
             self.subsample = VggSubsample(
                 subsampling_factor=self.subsampling_factor,
-                feat_in=feat_out,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
                 data_format="channels_last" if mode == "stream" else "channels_first",
@@ -591,18 +590,21 @@ class EmformerBlock(tf.keras.layers.Layer):
     ):
         bs = tf.shape(q)[0]
 
+        # 0. Scale dot-product, doing the division to either query or key
+        # instead of their product saves some computation
+        q /= tf.sqrt(tf.cast(self.d_k, q.dtype))
+
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
+        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2)))
 
         # 2. apply mask and softmax
         if mask is not None:
             # using float(-inf) or -math.inf or -10e9 gives nan after softmax
             # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
-            inf_neg = -1e9
+            inf_neg = -10e9
 
             attn_scores += inf_neg * (1.0 - mask)  # make sure softmax avoids mask
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs = tf.math.multiply(attn_probs, mask)  # zero out completely
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
