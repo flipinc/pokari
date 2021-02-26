@@ -117,6 +117,8 @@ class MockStream:
         Ref: https://arxiv.org/pdf/2010.14665.pdf
 
         TODO: The accuracy is significantly low when features_per_stream is small
+        TODO: Implement dynamic overlapping inference in the following link:
+        https://arxiv.org/pdf/2005.03271v1.pdf
 
         Args:
             features_per_stream: number of features to be fed into encoder. Better to

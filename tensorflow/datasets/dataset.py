@@ -68,8 +68,8 @@ class Dataset:
         self.entries = np.array(self.entries)
 
         # TODO: Delete this? Dataset is already being shuffled in tf.data.Dataset
-        # if self.shuffle:
-        #     np.random.shuffle(self.entries)  # Mix transcripts.tsv
+        if self.shuffle:
+            np.random.shuffle(self.entries)  # Mix transcripts.tsv
 
         self.steps_per_epoch = len(self.entries)
 
