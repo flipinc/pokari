@@ -449,12 +449,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        return mask.astype("float32"), right_indexes
+        mask = tf.convert_to_tensor(mask, tf.float32)
+        right_indexes = tf.convert_to_tensor(right_indexes, tf.int32)
 
-        # mask = tf.convert_to_tensor(mask, tf.float32)
-        # right_indexes = tf.convert_to_tensor(right_indexes, tf.int32)
-
-        # return mask, right_indexes
+        return mask, right_indexes
 
     def stream(
         self,
@@ -529,10 +527,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        # using numpy mask instead of tensorflow gives 40%+ training time reduction
-        # mask, right_indexes = tf.numpy_function(
-        #     self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
-        # )
         mask, right_indexes = self.create_mask(audio_lens, t_new)
 
         # 4. Hard copy right context and prepare input for the first iteration
@@ -597,10 +591,10 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         # 0. Scale dot-product, doing the division to either query or key
         # instead of their product saves some computation
-        # q /= tf.sqrt(tf.cast(self.d_k, q.dtype))
+        q /= tf.sqrt(tf.cast(self.d_k, q.dtype))
 
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
+        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2)))
 
         # 2. apply mask and softmax
         if mask is not None:
