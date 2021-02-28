@@ -213,6 +213,7 @@ class BaseModel(tf.keras.Model):
 
         # add variational noise for better generalization to out-of-domain data
         # ref: https://arxiv.org/pdf/2005.03271v1.pdf
+        # TODO: after gradient clipping or before gradient clipping
         # TODO: make this work in train_step. currently since auto-graph is set to
         # false (see the comment at `train_step`), this script does not work
         # if self.variational_noise_cfg is not None:

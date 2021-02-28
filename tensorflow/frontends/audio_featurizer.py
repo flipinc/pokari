@@ -4,34 +4,7 @@ import numpy as np
 import tensorflow as tf
 
 
-class STFT(tf.keras.layers.Layer):
-    """Short time fourier transform
-
-    TODO: STFT can be only run in float32. In the future, when support for mixed
-    precision is added, stft must be separeted so it can run in float32
-
-    """
-
-    def __init__(self, win_length, hop_length, n_fft, name="stft"):
-        super().__init__(name=name, dtype=tf.float32)
-
-        self.win_length = win_length
-        self.hop_length = hop_length
-        self.n_fft = n_fft
-
-    def call(self, x):
-        x = tf.signal.stft(
-            x,
-            frame_length=self.win_length,
-            frame_step=self.hop_length,
-            fft_length=self.n_fft,
-            pad_end=True,
-        )
-
-        return x
-
-
-class AudioFeaturizer(tf.keras.layers.Layer):
+class AudioFeaturizer:
     def __init__(
         self,
         sample_rate: int = 16000,
@@ -42,13 +15,8 @@ class AudioFeaturizer(tf.keras.layers.Layer):
         preemph: float = 0.97,
         n_mels: int = 80,
         dither: float = 1e-5,
-        # followings are to used in the future
         pad_to: int = 8,
-        pad_value: int = 0,
-        name="audio_featurizer",
     ):
-        super().__init__(name=name)
-
         self.sample_rate = sample_rate
         self.win_length = int(window_size * sample_rate)
         self.hop_length = int(window_stride * sample_rate)
@@ -59,19 +27,13 @@ class AudioFeaturizer(tf.keras.layers.Layer):
         self.n_fft = n_fft or 2 ** math.ceil(math.log2(self.win_length))
         self.pad_to = pad_to
 
-        self.stft = STFT(
-            win_length=self.win_length,
-            hop_length=self.hop_length,
-            n_fft=self.n_fft,
-        )
-
     def extract(self, signal: np.ndarray) -> np.ndarray:
         signal = np.asfortranarray(signal)
         features = self(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
-    def call(
-        self, audio_signals, audio_lens, training: bool = False, inference: bool = False
+    def __call__(
+        self, audio_signals, audio_lens, training: bool = None, inference: bool = False
     ):
         """
 
@@ -100,7 +62,15 @@ class AudioFeaturizer(tf.keras.layers.Layer):
             )
 
         # [B, T, nfft/2]
-        stfts = self.stft(x)
+        # TODO: STFT can be only run in float32. In the future, when support for mixed
+        # precision is added, stft must be separeted so it can run in float32
+        stfts = tf.signal.stft(
+            x,
+            frame_length=self.win_length,
+            frame_step=self.hop_length,
+            fft_length=self.n_fft,
+            pad_end=True,
+        )
 
         # stft returns real & imag, so convert to magnitude
         # x1 for energy spectrogram, x2 for power spectrum

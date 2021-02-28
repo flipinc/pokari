@@ -28,6 +28,8 @@ works.
 ### Limitations on Tensorflow Version
 - Since warp_rnnt (optimized for CUDA for faster loss calculation) is not used, training time is much slower than PyTorch. It is desirable to use ![this library](https://github.com/HawkAaron/warp-transducer), but its required tensorflow version conflicts with RTX3090 which I am using for training.
 - Gradient variational noise is not implemented yet
+- CTC is not perfectly implemented yet
+- Mixed precision training is not supported yet
 
 ### Design
 - Pytorch is very easy to develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Transducer model is quite complex because of its stateful structure, and I have not yet seen any successfully exported PyTorch models. For reference, CTC can be exported and ![NeMo](https://github.com/NVIDIA/NeMo/blob/25abffdd37efb3a9f5a6e236d910f045271ae08f/nemo/collections/asr/models/ctc_models.py) provides an interface for it.

@@ -13,8 +13,8 @@ class VggSubsample(tf.keras.layers.Layer):
         feat_out (int): size of the output features
         conv_channels (int): Number of channels for the convolution layers.
 
-    TODO: This module is very slow in graph mode thus it is not recommend to use this.
-    But works fine in eager mode.
+    TODO: This module does not work properly when using with Emformer. Maybe it won't
+    work with other modules too. Use stack subsampling instead. DO NOT USE YET.
 
     Note: Conv2D on CPU does not support NCHW format
 
@@ -88,13 +88,15 @@ class VggSubsample(tf.keras.layers.Layer):
             feat_out,
             kernel_regularizer=kernel_regularizer,
             bias_regularizer=bias_regularizer,
+            activation="relu",  # TODO: experimental
         )
 
     def calc_length(self, audio_lens: tf.int32):
         return tf.cast(tf.math.ceil(audio_lens / self.pool_stride), tf.int32)
 
-    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None, training: bool = False):
+    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None, training: bool = None):
         """
+
         Args:
             x (torch.Tensor): [B, Tmax, D]
 
@@ -136,6 +138,12 @@ class VggSubsample(tf.keras.layers.Layer):
 
 
 class ConvSubsample(tf.keras.layers.Layer):
+    """
+
+    TODO: This implementation is not complete. DO NOT USE YET.
+
+    """
+
     def __init__(
         self,
         feat_out: int,

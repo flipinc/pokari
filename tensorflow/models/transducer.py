@@ -80,20 +80,22 @@ class Transducer(BaseModel):
         target_lens = inputs["target_lens"]
 
         # [B, T, n_mels]
-        audio_features, audio_lens = self.audio_featurizer(audio_signals, audio_lens)
+        audio_features, audio_lens = self.audio_featurizer(
+            audio_signals, audio_lens, training
+        )
 
         # [B, T, n_mels]
         if training:
             audio_features = self.spec_augment(audio_features)
 
         # [B, T, D_e]
-        encoded_outs, encoded_lens = self.encoder(audio_features, audio_lens)
+        encoded_outs, encoded_lens = self.encoder(audio_features, audio_lens, training)
 
         # [B, U, D_p]
-        decoded_outs = self.predictor(targets, target_lens)
+        decoded_outs = self.predictor(targets, target_lens, training)
 
         # [B, T, U, D_j]
-        logits = self.joint([encoded_outs, decoded_outs])
+        logits = self.joint([encoded_outs, decoded_outs], training)
 
         return {
             "logits": logits,
