@@ -7,6 +7,13 @@ from modules.subsample import StackSubsample, VggSubsample
 
 
 class EmformerEncoder(tf.keras.layers.Layer):
+    """
+
+    Some training tips for emformer
+    - Gradient clipping is required for stable training
+
+    """
+
     def __init__(
         self,
         num_layers: int,
@@ -16,7 +23,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         dropout_attn: int,
         subsampling: str,
         subsampling_factor: int,
-        subsampling_dim: int,  # conv channels. used for vgg susampling
+        subsampling_dim: int,
         left_length: int,
         chunk_length: int,
         right_length: int,
@@ -449,10 +456,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        mask = tf.convert_to_tensor(mask, tf.float32)
-        right_indexes = tf.convert_to_tensor(right_indexes, tf.int32)
-
-        return mask, right_indexes
+        return mask.astype("float32"), right_indexes
 
     def stream(
         self,
@@ -505,7 +509,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         )
 
     def call(
-        self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = False
+        self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = None
     ):
         """
 
@@ -527,7 +531,11 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        mask, right_indexes = self.create_mask(audio_lens, t_new)
+        # using numpy mask instead of tensorflow gives 40%+ training time reduction
+        # and this does not affect training at all
+        mask, right_indexes = tf.numpy_function(
+            self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
+        )
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
@@ -545,6 +553,13 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
 
 class EmformerBlock(tf.keras.layers.Layer):
+    """
+
+    Transformer modules is referenced from
+    https://github.com/Kyubyong/transformer/blob/master/modules.py
+
+    """
+
     def __init__(
         self,
         num_heads: int,
@@ -575,7 +590,7 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
-        self.linear_out_1 = tf.keras.layers.Dense(dim_ffn)
+        self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
 
     def attend(
@@ -585,24 +600,23 @@ class EmformerBlock(tf.keras.layers.Layer):
         k: tf.Tensor,
         v: tf.Tensor,
         mask: tf.Tensor = None,
-        training: bool = False,
+        training: bool = None,
     ):
         bs = tf.shape(q)[0]
 
-        # 0. Scale dot-product, doing the division to either query or key
-        # instead of their product saves some computation
-        q /= tf.sqrt(tf.cast(self.d_k, q.dtype))
-
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2)))
+        # TODO: doing the division to either query or key instead of their product
+        # saves some computation
+        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
 
         # 2. apply mask and softmax
         if mask is not None:
             # using float(-inf) or -math.inf gives nan after softmax
             # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
-            attn_scores += -1e9 * (1.0 - mask)  # make sure softmax avoids mask
+            attn_scores += -1e9 * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs = attn_probs * mask
+            # TODO: does doing this improve accuracy?
+            # attn_probs = attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
@@ -612,23 +626,22 @@ class EmformerBlock(tf.keras.layers.Layer):
         output = tf.matmul(attn_probs, v)
         output = tf.transpose(output, [0, 2, 1, 3])
         output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
-        attn_out = output + x
+        output += x
+        attn_out = self.ln_out_1(output)
 
-        # 4. layer norm
-        output = self.ln_out_1(attn_out)
-
-        # 5. feed forward and add residual
-        output = self.linear_out_1(output)
-        output = self.linear_out_2(output) + attn_out
-
-        # 6. layer norm
+        # 4. FFN module in transformer
+        output = self.linear_out_1(attn_out)
+        output = self.linear_out_2(output)
+        # TODO: original emformer's impl is slightly different as output before ln_out_1
+        # is added as residual
+        output += attn_out
         output = self.ln_out_2(output)
 
         return output
 
     def stream(
         self,
-        x: tf.Tensor,
+        inputs: tf.Tensor,
         cache_k: tf.Tensor,
         cache_v: tf.Tensor,
     ):
@@ -650,10 +663,10 @@ class EmformerBlock(tf.keras.layers.Layer):
             cache_k (tf.Tensor): [N, B, H, L, D/H]
             cache_v (tf.Tensor): [N, B, H, L, D/H]
         """
-        bs = tf.shape(x)[0]
+        bs = tf.shape(inputs)[0]
 
         # 1. apply layer norm
-        x = self.ln_in(x)
+        x = self.ln_in(inputs)
 
         # 2. calculate q -> [B, H, C+R, D]
         q = self.linear_q(x)
@@ -678,15 +691,15 @@ class EmformerBlock(tf.keras.layers.Layer):
         ]
         v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(x, q, k, v, training=False)
+        output = self.attend(inputs, q, k, v, training=False)
 
         return output, (new_cache_k, new_cache_v)
 
     def call(
         self,
-        x: tf.Tensor,
+        inputs: tf.Tensor,
         mask: tf.int32,
-        training: bool = False,
+        training: bool = None,
     ):
         """
 
@@ -700,10 +713,10 @@ class EmformerBlock(tf.keras.layers.Layer):
         Returns:
             tf.Tensor: [B, Total_R+Tmax, D]
         """
-        bs = tf.shape(x)[0]
+        bs = tf.shape(inputs)[0]
 
         # 1. perform layer norm
-        x = self.ln_in(x)
+        x = self.ln_in(inputs)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
         q = self.linear_q(x)
@@ -716,6 +729,6 @@ class EmformerBlock(tf.keras.layers.Layer):
         k = tf.transpose(k, [0, 2, 1, 3])
         v = tf.transpose(v, [0, 2, 1, 3])
 
-        x = self.attend(x, q, k, v, mask, training)
+        x = self.attend(inputs, q, k, v, mask, training)
 
         return x

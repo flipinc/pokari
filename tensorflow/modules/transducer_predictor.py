@@ -84,7 +84,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
 
         return tf.stack(states, axis=0)
 
-    def call(self, targets, target_lens, training=False):
+    def call(self, targets, target_lens, training=None):
         """
 
         Args:
