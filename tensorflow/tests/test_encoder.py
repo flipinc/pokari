@@ -11,7 +11,6 @@ cfg = OmegaConf.create(
         "subsampling": "vgg",
         "subsampling_factor": subsampling_factor,
         "subsampling_dim": 256,
-        "feat_in": 80,
         "num_layers": 16,
         "num_heads": 8,
         "dim_model": 512,

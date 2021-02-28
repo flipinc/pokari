@@ -44,7 +44,10 @@ class AudioFeaturizer:
         x = audio_signals
         del audio_signals
 
-        audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
+        # ref: https://www.tensorflow.org/api_docs/python/tf/signal/frame
+        audio_lens = tf.cast(
+            1 + (audio_lens - self.win_length) // self.hop_length, tf.int32
+        )
 
         # dither
         if self.dither > 0:
@@ -61,7 +64,7 @@ class AudioFeaturizer:
                 axis=1,
             )
 
-        # [B, T, nfft/2]
+        # [B, T, nfft/2 + 1]
         # TODO: STFT can be only run in float32. In the future, when support for mixed
         # precision is added, stft must be separeted so it can run in float32
         stfts = tf.signal.stft(
@@ -69,14 +72,13 @@ class AudioFeaturizer:
             frame_length=self.win_length,
             frame_step=self.hop_length,
             fft_length=self.n_fft,
-            pad_end=True,
         )
 
         # stft returns real & imag, so convert to magnitude
         # x1 for energy spectrogram, x2 for power spectrum
         spectrograms = tf.square(tf.abs(stfts))
 
-        # [nfft/2, n_mel]
+        # [nfft/2 + 1, n_mel]
         mel_weight = tf.signal.linear_to_mel_weight_matrix(
             num_mel_bins=self.n_mels,
             num_spectrogram_bins=tf.shape(spectrograms)[-1],

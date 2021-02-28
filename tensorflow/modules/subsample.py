@@ -5,21 +5,6 @@ from utils.utils import shape_list
 
 
 class VggSubsample(tf.keras.layers.Layer):
-    """Causal Vgg subsampling introduced in https://arxiv.org/pdf/1910.12977.pdf
-
-    Args:
-        subsampling_factor (int): The subsampling factor which should be a power of 2
-        feat_in (int): size of the input features
-        feat_out (int): size of the output features
-        conv_channels (int): Number of channels for the convolution layers.
-
-    TODO: This module does not work properly when using with Emformer. Maybe it won't
-    work with other modules too. Use stack subsampling instead. DO NOT USE YET.
-
-    Note: Conv2D on CPU does not support NCHW format
-
-    """
-
     def __init__(
         self,
         subsampling_factor: int,
@@ -34,11 +19,9 @@ class VggSubsample(tf.keras.layers.Layer):
 
         self.sampling_num = int(math.log(subsampling_factor, 2))
 
-        self.kernel_size = 3
-        self.left_padding = self.kernel_size - 1
-
-        self.pool_stride = 2
-        self.pool_kernel_size = 2
+        kernel_size = 3
+        self.left_padding = kernel_size - 1
+        self.pool_strides = 2
 
         self.data_format = data_format
 
@@ -46,11 +29,9 @@ class VggSubsample(tf.keras.layers.Layer):
         for i in range(self.sampling_num):
             conv1 = tf.keras.layers.Conv2D(
                 filters=conv_channels,
-                kernel_size=self.kernel_size,
+                kernel_size=kernel_size,
                 strides=1,
-                padding="valid"  # first padding is added manually
-                if i == 0
-                else "same",
+                padding="same",
                 activation="relu",
                 data_format=data_format,
                 kernel_regularizer=kernel_regularizer,
@@ -59,7 +40,7 @@ class VggSubsample(tf.keras.layers.Layer):
             )
             conv2 = tf.keras.layers.Conv2D(
                 filters=conv_channels,
-                kernel_size=self.kernel_size,
+                kernel_size=kernel_size,
                 strides=1,
                 padding="same",
                 activation="relu",
@@ -69,8 +50,7 @@ class VggSubsample(tf.keras.layers.Layer):
                 name=f"{name}_{i}_conv2",
             )
             pool = tf.keras.layers.MaxPool2D(
-                pool_size=self.pool_kernel_size,
-                strides=self.pool_stride,
+                pool_size=self.pool_strides,
                 padding="same",
                 data_format=data_format,
                 name=f"{name}_{i}_pool",
@@ -88,21 +68,12 @@ class VggSubsample(tf.keras.layers.Layer):
             feat_out,
             kernel_regularizer=kernel_regularizer,
             bias_regularizer=bias_regularizer,
-            activation="relu",  # TODO: experimental
         )
 
     def calc_length(self, audio_lens: tf.int32):
-        return tf.cast(tf.math.ceil(audio_lens / self.pool_stride), tf.int32)
+        return tf.cast(tf.math.ceil(audio_lens / self.pool_strides), tf.int32)
 
-    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None, training: bool = None):
-        """
-
-        Args:
-            x (torch.Tensor): [B, Tmax, D]
-
-        Returns:
-            [B, Tmax, D]
-        """
+    def call(self, x: tf.Tensor, audio_lens: tf.int32, training=False, **kwargs):
         # 1. add padding to make this causal convolution
         x = tf.pad(x, [[0, 0], [self.left_padding, 0], [1, 1]])
 
@@ -113,11 +84,10 @@ class VggSubsample(tf.keras.layers.Layer):
             # 2.2 add channel dimension -> [B, Tmax, D, 1]
             x = tf.expand_dims(x, axis=-1)
 
-        # 3. forward
         for layer in self.layers:
-            x = layer["conv1"](x)
-            x = layer["conv2"](x)
-            x = layer["pool"](x)
+            x = layer["conv1"](x, training=training)
+            x = layer["conv2"](x, training=training)
+            x = layer["pool"](x, training=training)
 
         if self.data_format == "channels_first":
             x = tf.transpose(x, (0, 2, 3, 1))
@@ -159,6 +129,7 @@ class ConvSubsample(tf.keras.layers.Layer):
 
         kernel_size = 3
         strides = 2
+        self.subsampling_factor = strides * 2
 
         self.data_format = data_format
 
@@ -167,6 +138,7 @@ class ConvSubsample(tf.keras.layers.Layer):
             kernel_size=kernel_size,
             strides=strides,
             padding="same",
+            activation="relu",
             data_format=data_format,
             kernel_regularizer=kernel_regularizer,
             bias_regularizer=bias_regularizer,
@@ -177,6 +149,7 @@ class ConvSubsample(tf.keras.layers.Layer):
             kernel_size=kernel_size,
             strides=strides,
             padding="same",
+            activation="relu",
             data_format=data_format,
             kernel_regularizer=kernel_regularizer,
             bias_regularizer=bias_regularizer,
@@ -190,8 +163,6 @@ class ConvSubsample(tf.keras.layers.Layer):
             name=f"{name}_linear",
         )
 
-        self.subsampling_factor = self.conv1.strides[0] + self.conv2.strides[0]
-
     def call(self, x, audio_lens: tf.int32 = None, training=False):
         if self.data_format == "channels_first":
             # 1.1 add channel dimension -> [B, 1, Tmax, D]
@@ -202,10 +173,7 @@ class ConvSubsample(tf.keras.layers.Layer):
 
         # 2. convolution
         x = self.conv1(x, training=training)
-        x = tf.nn.relu(x)
-
         x = self.conv2(x, training=training)
-        x = tf.nn.relu(x)
 
         # 3. remove channel dimension
         if self.data_format == "channels_first":
