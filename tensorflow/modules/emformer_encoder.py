@@ -51,7 +51,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
         if dim_model % subsampling_factor > 0:
             raise ValueError("dim_model must be divisible by subsampling_factor.")
 
-        self.linear = tf.keras.layers.Dense(feat_out)
+        # bias is set to false because when subsampling it might give unexpected noise
+        self.linear = tf.keras.layers.Dense(feat_out, use_bias=False)
 
         if self.subsampling == "stack":
             self.subsample = StackSubsample(
