@@ -12,8 +12,7 @@ class TestFrontend:
         _, target_audio_lens = audio_featurizer(audio_signals, audio_lens)
 
         source_audio_lens = tf.cast(
-            1
-            + (audio_lens - audio_featurizer.win_length) // audio_featurizer.hop_length,
+            tf.math.ceil(audio_lens / audio_featurizer.hop_length),
             tf.int32,
         )
 

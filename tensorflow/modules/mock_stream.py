@@ -83,7 +83,7 @@ class MockStream:
             chunk_audio_lens = tf.expand_dims(end_offset - start_offset, axis=0)
 
             audio_features, _ = self.audio_featurizer(
-                chunk_audio_signal, chunk_audio_lens, training=False, inference=True
+                chunk_audio_signal, chunk_audio_lens
             )
 
             encoded_outs, prev_encoder_cache = self.encoder.stream(
@@ -151,7 +151,7 @@ class MockStream:
             chunk_audio_lens = tf.expand_dims(end_offset - start_offset, axis=0)
 
             audio_features, _ = self.audio_featurizer(
-                chunk_audio_signal, chunk_audio_lens, training=False, inference=True
+                chunk_audio_signal, chunk_audio_lens
             )
 
             encoded_outs, prev_encoder_cache = self.encoder.stream(

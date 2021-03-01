@@ -27,16 +27,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
-        mode: str = "full_context",
         name: str = "emformer_encoder",
     ):
         super().__init__(name=name)
-
-        if mode == "stream":
-            print(
-                "🚄 Running Emformer in stream mode. If this is unintentional, please "
-                "turn `mode` to `full_context` because some optimizations will be lost!"
-            )
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
@@ -63,7 +56,6 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 subsampling_factor=self.subsampling_factor,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
-                data_format="channels_last" if mode == "stream" else "channels_first",
                 name=f"{self.name}_vgg_subsample",
             )
 

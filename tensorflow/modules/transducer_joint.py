@@ -45,7 +45,7 @@ class TransducerJoint(tf.keras.layers.Layer):
             name=f"{name}_joint",
         )
 
-    def call(self, inputs, training=None, **kwargs):
+    def call(self, inputs, training=False, **kwargs):
         """
 
         encoder_outputs: [B, T, D_e]
