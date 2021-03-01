@@ -16,7 +16,7 @@ trainer:
   log_interval: 100
   # model_path: outputs/tensorflow/checkpoints/emformer_02_char_mini_vgg_new.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_no_bias.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_vgg.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000

@@ -203,16 +203,18 @@ class SubwordFeaturizer(TextFeaturizer):
             "vocabulary": vocabulary,
             "target_vocab_size": target_vocab_size,
             "max_subword_length": max_subword_length,
+            "max_corpus_chars": None,
+            "reserved_tokens": None,
         }
         super().__init__(decoder_config)
 
         if subwords_path and os.path.exists(subwords_path):
-            subwords = self.load_from_file(decoder_config, subwords_path)
+            self.subwords = self.load_from_file(decoder_config, subwords_path)
         else:
-            subwords = self.build_from_corpus(decoder_config, subwords_corpus)
+            self.subwords = self.build_from_corpus(decoder_config, subwords_corpus)
             self.save_to_file(subwords_path)
 
-        self.subwords = self.__load_subwords() if subwords is None else subwords
+        # self.subwords = self.__load_subwords() if subwords is None else subwords
         self.blank = 0  # subword treats blank as 0
         self.num_classes = self.subwords.vocab_size
 
@@ -226,9 +228,9 @@ class SubwordFeaturizer(TextFeaturizer):
         self.upoints = tf.strings.unicode_decode(text, "UTF-8")
         self.upoints = self.upoints.to_tensor()  # [num_classes, max_subword_length]
 
-    def __load_subwords(self):
-        filename_prefix = os.path.splitext(self.decoder_config["vocabulary"])[0]
-        return tds.deprecated.text.SubwordTextEncoder.load_from_file(filename_prefix)
+    # def __load_subwords(self):
+    #     filename_prefix = os.path.splitext(self.decoder_config["vocabulary"])[0]
+    #     return tds.deprecated.text.SubwordTextEncoder.load_from_file(filename_prefix)
 
     def build_from_corpus(self, dconf: dict, corpus_files: list = None):
         def corpus_generator():

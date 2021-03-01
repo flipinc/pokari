@@ -31,9 +31,7 @@ class VggSubsample(tf.keras.layers.Layer):
                 filters=conv_channels,
                 kernel_size=kernel_size,
                 strides=1,
-                padding="valid"  # first padding is added manually
-                if i == 0
-                else "same",
+                padding="same",
                 activation="relu",
                 data_format=data_format,
                 kernel_regularizer=kernel_regularizer,
@@ -76,14 +74,20 @@ class VggSubsample(tf.keras.layers.Layer):
         return tf.cast(tf.math.ceil(audio_lens / self.pool_strides), tf.int32)
 
     def call(self, x: tf.Tensor, audio_lens: tf.int32, training=False, **kwargs):
-        # 1. add padding to make this causal convolution
-        x = tf.pad(x, [[0, 0], [self.left_padding, 0], [1, 1]])
+        """
 
+        Args:
+            x: [B, Tmax, D]
+
+        TODO: Add support for causal convolution. For causal conv to work, manual
+        padding is required for EVERY LAYER
+
+        """
         if self.data_format == "channels_first":
-            # 2.1 add channel dimension -> [B, 1, Tmax, D]
+            # 1.1 add channel dimension -> [B, 1, Tmax, D]
             x = tf.expand_dims(x, axis=1)
         else:
-            # 2.2 add channel dimension -> [B, Tmax, D, 1]
+            # 1.2 add channel dimension -> [B, Tmax, D, 1]
             x = tf.expand_dims(x, axis=-1)
 
         for layer in self.layers:
