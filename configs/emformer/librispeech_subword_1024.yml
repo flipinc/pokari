@@ -12,7 +12,7 @@ trainer:
   log_interval: null
   # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mask.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mxp.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_subword.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -66,8 +66,8 @@ text_feature:
   vocabulary: null
   target_vocab_size: 1024
   max_subword_length: 4
-  subwords_path: /workspace/datasets/4096_20.subwords # Path to file that stores generated subwords
-  subwords_corpus: # Transcript files for generating subwords
+  subwords_path: /workspace/datasets/1024_4.subwords
+  subwords_corpus:
     - /workspace/datasets/tensorflow_asr_360.tsv
 
 optimizer:
