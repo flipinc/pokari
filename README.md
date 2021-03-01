@@ -31,6 +31,9 @@ works.
 - CTC is not perfectly implemented yet
 - Mixed precision training is not supported yet
 
+### Advice
+- To keep tabs on which commit generated which result, when a training is finished, post a screen-shot of training loss curve, its commit number, and a configuration file used for it.
+
 ### Design
 - Pytorch is very easy to develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Transducer model is quite complex because of its stateful structure, and I have not yet seen any successfully exported PyTorch models. For reference, CTC can be exported and ![NeMo](https://github.com/NVIDIA/NeMo/blob/25abffdd37efb3a9f5a6e236d910f045271ae08f/nemo/collections/asr/models/ctc_models.py) provides an interface for it.
 
