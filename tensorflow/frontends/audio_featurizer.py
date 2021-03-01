@@ -32,9 +32,7 @@ class AudioFeaturizer:
         features = self(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
-    def __call__(
-        self, audio_signals, audio_lens, training: bool = None, inference: bool = False
-    ):
+    def __call__(self, audio_signals, audio_lens):
         """
 
         Returns:
@@ -44,10 +42,7 @@ class AudioFeaturizer:
         x = audio_signals
         del audio_signals
 
-        # ref: https://www.tensorflow.org/api_docs/python/tf/signal/frame
-        audio_lens = tf.cast(
-            1 + (audio_lens - self.win_length) // self.hop_length, tf.int32
-        )
+        audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
 
         # dither
         if self.dither > 0:
@@ -72,6 +67,7 @@ class AudioFeaturizer:
             frame_length=self.win_length,
             frame_step=self.hop_length,
             fft_length=self.n_fft,
+            pad_end=True,
         )
 
         # stft returns real & imag, so convert to magnitude
@@ -103,14 +99,13 @@ class AudioFeaturizer:
             x = self.normalize(x, audio_lens)
 
         # mask to zero any values beyond audio_lens in batch
-        if not inference:
-            mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
-            # [B, T_max] >= [B, 1] -> [B, T_max]
-            mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
-            x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
+        mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
+        # [B, T_max] >= [B, 1] -> [B, T_max]
+        mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
+        x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
 
         # pad to multiple of pad_to for efficient tensor core use
-        if training and self.pad_to > 0:
+        if self.pad_to > 0:
             pad_amount = tf.shape(x)[-1] % self.pad_to
             if pad_amount != 0:
                 x = tf.pad(

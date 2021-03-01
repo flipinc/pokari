@@ -19,7 +19,6 @@ cfg = OmegaConf.create(
         "left_length": 20,
         "chunk_length": 32,
         "right_length": 8,
-        "mode": "stream",
     }
 )
 
