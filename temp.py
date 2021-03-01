@@ -1,21 +1,15 @@
 import math
 
 import numpy as np
-import tensorflow as tf
-
 from modules.subsample import StackSubsample, VggSubsample
+
+import tensorflow as tf
 
 
 class EmformerEncoder(tf.keras.layers.Layer):
-    """
-
-    Some training tips for emformer
-    - Gradient clipping is required for stable training
-
-    """
-
     def __init__(
         self,
+        feat_in: int,
         num_layers: int,
         num_heads: int,
         dim_model: int,
@@ -23,20 +17,13 @@ class EmformerEncoder(tf.keras.layers.Layer):
         dropout_attn: int,
         subsampling: str,
         subsampling_factor: int,
-        subsampling_dim: int,
+        subsampling_dim: int,  # conv channels. used for vgg susampling
         left_length: int,
         chunk_length: int,
         right_length: int,
-        mode: str = "full_context",
         name: str = "emformer_encoder",
     ):
         super().__init__(name=name)
-
-        if mode == "stream":
-            print(
-                "🚄 Running Emformer in stream mode. If this is unintentional, please "
-                "turn `mode` to `full_context` because some optimizations will be lost!"
-            )
 
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
@@ -61,9 +48,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
         elif self.subsampling == "vgg":
             self.subsample = VggSubsample(
                 subsampling_factor=self.subsampling_factor,
+                feat_in=feat_out,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
-                data_format="channels_last" if mode == "stream" else "channels_first",
+                activation=tf.nn.relu,
                 name=f"{self.name}_vgg_subsample",
             )
 
@@ -351,10 +339,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = tf.concat([mask_top, mask_bottom], axis=-2)
         mask = tf.expand_dims(mask, axis=1)
 
-        # TODO: for mxp trainig, casting manually to tf.float32 will give an error
-        mask = tf.cast(mask, tf.float32)
+        # return tf.equal(mask, 1), right_indexes
 
-        return mask, right_indexes
+        return tf.cast(mask, tf.float32), right_indexes
 
     def np_create_mask(self, audio_lens: np.array, t_max: int):
         """Numpy implementatino of emformer attention mask"""
@@ -458,6 +445,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         return mask.astype("float32"), right_indexes
 
+        # return mask == 1, right_indexes
+
     def stream(
         self,
         audio_features: tf.Tensor,
@@ -480,14 +469,38 @@ class EmformerEncoder(tf.keras.layers.Layer):
         x = self.subsample(x)
 
         # 3. loop over layers while saving cache at the same time
-        new_cache_k = new_cache_v = []
+        new_cache_k = tf.TensorArray(
+            self.dtype,
+            size=len(self.layers),
+            clear_after_read=True,
+            element_shape=tf.TensorShape(
+                (
+                    None,  # batch size
+                    self.left_length,
+                    self.num_heads,
+                    self.dim_model // self.num_heads,
+                )
+            ),
+        )
+        new_cache_v = tf.TensorArray(
+            self.dtype,
+            size=len(self.layers),
+            clear_after_read=True,
+            element_shape=tf.TensorShape(
+                (
+                    None,  # batch size
+                    self.left_length,
+                    self.num_heads,
+                    self.dim_model // self.num_heads,
+                )
+            ),
+        )
         for i, layer in enumerate(self.layers):
             x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
-            new_cache_k.append(temp_cache_k)
-            new_cache_v.append(temp_cache_v)
-
-        new_cache_k = tf.stack(new_cache_k, axis=0)
-        new_cache_v = tf.stack(new_cache_v, axis=0)
+            new_cache_k = new_cache_k.write(i, temp_cache_k)
+            new_cache_v = new_cache_v.write(i, temp_cache_v)
+        new_cache_k = new_cache_k.stack()
+        new_cache_v = new_cache_v.stack()
         new_cache = tf.stack([new_cache_k, new_cache_v], axis=0)
 
         # 4. Trim right context
@@ -508,9 +521,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
             ]
         )
 
-    def call(
-        self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = None
-    ):
+    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32):
         """
 
         D_1: number of mels. This number has to match D_2 after frame stacking
@@ -531,8 +542,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        # using numpy mask instead of tensorflow gives 40%+ training time reduction
-        # and this does not affect training at all
+        # mask, right_indexes = self.create_mask(audio_lens, t_new)
         mask, right_indexes = tf.numpy_function(
             self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
         )
@@ -544,22 +554,17 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 5. loop over layers.
         for layer in self.layers:
-            x = layer(x, mask, training)
+            x = layer(x, mask)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
+
+        # tf.print("🐳", x)
 
         return x, audio_lens
 
 
 class EmformerBlock(tf.keras.layers.Layer):
-    """
-
-    Transformer modules is referenced from
-    https://github.com/Kyubyong/transformer/blob/master/modules.py
-
-    """
-
     def __init__(
         self,
         num_heads: int,
@@ -588,6 +593,8 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.linear_k = tf.keras.layers.Dense(dim_model)
         self.linear_v = tf.keras.layers.Dense(dim_model)
 
+        self.softmax = tf.keras.layers.Softmax()
+
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
@@ -600,27 +607,28 @@ class EmformerBlock(tf.keras.layers.Layer):
         k: tf.Tensor,
         v: tf.Tensor,
         mask: tf.Tensor = None,
-        training: bool = None,
     ):
         bs = tf.shape(q)[0]
 
         # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        # TODO: doing the division to either query or key instead of their product
-        # saves some computation
         attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
 
         # 2. apply mask and softmax
         if mask is not None:
-            # using float(-inf) or -math.inf gives nan after softmax
-            # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
-            attn_scores += -1e9 * (1.0 - mask)
+            if self.dtype == tf.float16:
+                # for amp
+                inf_neg = tf.float16.min
+            else:
+                # using float(-inf) or -math.inf gives nan after softmax
+                inf_neg = -1e9
+
+            attn_scores += inf_neg * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            # TODO: does doing this improve accuracy?
             # attn_probs = attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 
-        attn_probs = self.attn_dropout(attn_probs, training=training)
+        attn_probs = self.attn_dropout(attn_probs)
 
         # 3. attend and add residual
         output = tf.matmul(attn_probs, v)
@@ -629,32 +637,29 @@ class EmformerBlock(tf.keras.layers.Layer):
         output += x
         attn_out = self.ln_out_1(output)
 
-        # 4. FFN module in transformer
+        # 5. FFN modules
         output = self.linear_out_1(attn_out)
         output = self.linear_out_2(output)
-        # TODO: original emformer's impl is slightly different as output before ln_out_1
-        # is added as residual
+        # emformer impl is slightly different. before ln_out_1 is added in emformer
         output += attn_out
         output = self.ln_out_2(output)
+
+        # ref: https://github.com/Kyubyong/transformer/blob/master/modules.py
 
         return output
 
     def stream(
         self,
-        inputs: tf.Tensor,
+        x: tf.Tensor,
         cache_k: tf.Tensor,
         cache_v: tf.Tensor,
     ):
         """
         Note: At inference time, the notion of Left, Chunk, Right contexts still exists
-        because without them, the compatibility with training will be lost.
-        For example, at training time, the output for t_0, t_1, t_2 is determined by
-        the input of t_0, t_1, t_2 PLUS right contexts. This must be the case for
-        inference too.
-
-        Note: Only a part of chunk context is cached as next left context. Right context
-        cannot be cached because, at training time, right context at layer n is
-        calculated based on current segment (not previous segment).
+            because without them, the compatibility with training will be lost.
+            For example, at training time, the output for t_0, t_1, t_2 is determined
+            by the input of t_0, t_1, t_2 PLUS right contexts.
+            This must be the case for inference too.
 
         N: number of layers
 
@@ -663,19 +668,17 @@ class EmformerBlock(tf.keras.layers.Layer):
             cache_k (tf.Tensor): [N, B, H, L, D/H]
             cache_v (tf.Tensor): [N, B, H, L, D/H]
         """
-        bs = tf.shape(inputs)[0]
+        bs = tf.shape(x)[0]
 
         # 1. apply layer norm
-        x = self.ln_in(inputs)
+        x = self.ln_in(x)
 
         # 2. calculate q -> [B, H, C+R, D]
-        q = self.linear_q(x)
-        q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
+        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, (0, 2, 1, 3))
 
         # 3. calculate k and v -> [B, H, L+C+R, D]
-        k = self.linear_k(x)
-        k_cr = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
+        k_cr = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
         # we need to include previous cache as left length can extend beyond chunk.
         k = tf.concat([cache_k, k_cr], axis=1)
         new_cache_k = k[
@@ -683,15 +686,14 @@ class EmformerBlock(tf.keras.layers.Layer):
         ]
         k = tf.transpose(k, (0, 2, 1, 3))
 
-        v = self.linear_v(x)
-        v_cr = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
+        v_cr = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
         v = tf.concat([cache_v, v_cr], axis=1)
         new_cache_v = v[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
         v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(inputs, q, k, v, training=False)
+        output = self.attend(x, q, k, v)
 
         return output, (new_cache_k, new_cache_v)
 
@@ -699,7 +701,6 @@ class EmformerBlock(tf.keras.layers.Layer):
         self,
         inputs: tf.Tensor,
         mask: tf.int32,
-        training: bool = None,
     ):
         """
 
@@ -719,16 +720,13 @@ class EmformerBlock(tf.keras.layers.Layer):
         x = self.ln_in(inputs)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
-        q = self.linear_q(x)
-        k = self.linear_k(x)
-        v = self.linear_v(x)
-        q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
-        k = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
-        v = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
+        q = tf.reshape(self.linear_q(x), (bs, -1, self.num_heads, self.d_k))
+        k = tf.reshape(self.linear_k(x), (bs, -1, self.num_heads, self.d_k))
+        v = tf.reshape(self.linear_v(x), (bs, -1, self.num_heads, self.d_k))
         q = tf.transpose(q, [0, 2, 1, 3])
         k = tf.transpose(k, [0, 2, 1, 3])
         v = tf.transpose(v, [0, 2, 1, 3])
 
-        x = self.attend(inputs, q, k, v, mask, training)
+        x = self.attend(inputs, q, k, v, mask)
 
         return x

@@ -31,7 +31,9 @@ class VggSubsample(tf.keras.layers.Layer):
                 filters=conv_channels,
                 kernel_size=kernel_size,
                 strides=1,
-                padding="same",
+                padding="valid"  # first padding is added manually
+                if i == 0
+                else "same",
                 activation="relu",
                 data_format=data_format,
                 kernel_regularizer=kernel_regularizer,
