@@ -120,6 +120,12 @@ class StackSubsample(tf.keras.layers.Layer):
         self.subsampling_factor = subsampling_factor
 
     def call(self, x: tf.Tensor, audio_lens: tf.int32 = None):
+        """
+
+        Args:
+            audio_lens: This is None when in streaming mode.
+
+        """
         bs, t_max, f = shape_list(x)
 
         t_new = tf.cast(tf.math.ceil(t_max / self.subsampling_factor), tf.int32)

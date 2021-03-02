@@ -1,93 +1,76 @@
-import queue
-from multiprocessing import Manager, Process
-
-import pyaudio as pa
 import soundcard as sc
 from hydra.experimental import compose, initialize
 
 import tensorflow as tf
 
-initialize(config_path="../configs/emformer", job_name="emformer")
-cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
+# pulseaudio does not work on forked proceeses
+# ref: https://github.com/bastibe/SoundCard/issues/96
+
+# TODO: right now, rnnt demo is only supported
 
 if __name__ == "__main__":
-    SAMPLE_RATE = cfgs.tflite.sample_rate  # 16000
-    FRAME_LEN = cfgs.tflite.frame_length  # 1280ms + 320ms = 1.6
-    CHANNELS = cfgs.tflite.channels  # 1
-    MODEL_PATH = cfgs.tflite.model_path_to
+    initialize(config_path="../configs/rnnt", job_name="rnnt")
+    cfgs = compose(config_name="librispeech_char.yml")
 
-    NUM_PREDICTOR_LAYERS = cfgs.predictor.num_layers
-    PREDICTOR_DIM_MODEL = cfgs.predictor.dim_model
+    sample_rate = cfgs.audio_feature.sample_rate  # 16000
+    frame_len = cfgs.tflite.frame_length  # in seconds
+    model_path = cfgs.tflite.model_path_to
 
-    CHUNK_SIZE = int(FRAME_LEN * SAMPLE_RATE)
+    num_encoder_layers = cfgs.encoder.num_layers
+    encoder_dim_model = cfgs.encoder.num_units
 
-    p = pa.PyAudio()
+    num_predictor_layers = cfgs.predictor.num_layers
+    predictor_dim_model = cfgs.predictor.dim_model
+
+    chunk_size = int(frame_len * sample_rate)
 
     mics = sc.all_microphones(include_loopback=True)
     mic = sc.get_microphone(mics[0].id, include_loopback=True)
 
-    m = Manager()
-    mq = m.Queue()
+    model = tf.lite.Interpreter(model_path=model_path)
 
-    def recognizer(mq):
-        """Run inference on tflite model"""
-        model = tf.lite.Interpreter(model_path=MODEL_PATH)
+    input_details = model.get_input_details()
+    output_details = model.get_output_details()
 
-        input_details = model.get_input_details()
-        output_details = model.get_output_details()
+    model.resize_tensor_input(input_details[0]["index"], [chunk_size])
+    model.allocate_tensors()
 
-        model.resize_tensor_input(input_details[0]["index"], [CHUNK_SIZE])
-        model.allocate_tensors()
+    prev_token = tf.zeros(shape=[], dtype=tf.int32)
+    encoder_states = tf.zeros(
+        shape=[num_encoder_layers, 2, 1, encoder_dim_model],  # N_e, 2, B=1, D
+        dtype=tf.float32,
+    )
+    predictor_states = tf.zeros(
+        shape=[num_predictor_layers, 2, 1, predictor_dim_model],  # N_p, 2, B=1, D
+        dtype=tf.float32,
+    )
+    transcript = ""
 
-        def recognize(signal, prev_token, states):
-            if signal.shape[0] < CHUNK_SIZE:
-                signal = tf.pad(signal, [[0, CHUNK_SIZE - signal.shape[0]]])
+    def recognize(signal, prev_token, encoder_states, predictor_states):
+        if signal.shape[0] < chunk_size:
+            signal = tf.pad(signal, [[0, chunk_size - signal.shape[0]]])
 
-            model.set_tensor(input_details[0]["index"], signal)
-            model.set_tensor(input_details[1]["index"], prev_token)
-            model.set_tensor(input_details[2]["index"], states)
+        model.set_tensor(input_details[0]["index"], signal)
+        model.set_tensor(input_details[1]["index"], prev_token)
+        model.set_tensor(input_details[2]["index"], encoder_states)
+        model.set_tensor(input_details[3]["index"], predictor_states)
 
-            model.invoke()
+        model.invoke()
 
-            upoints = model.get_tensor(output_details[0]["index"])
-            prev_token = model.get_tensor(output_details[1]["index"])
-            states = model.get_tensor(output_details[2]["index"])
+        upoints = model.get_tensor(output_details[0]["index"])
+        prev_token = model.get_tensor(output_details[1]["index"])
+        encoder_states = model.get_tensor(output_details[2]["index"])
+        predictor_states = model.get_tensor(output_details[3]["index"])
 
-            text = "".join([chr(u) for u in upoints])
+        text = "".join([chr(u) for u in upoints])
 
-            return text, prev_token, states
+        return text, prev_token, encoder_states, predictor_states
 
-        prev_token = tf.zeros(shape=[], dtype=tf.int32)
-        states = tf.zeros(
-            shape=[NUM_PREDICTOR_LAYERS, 2, 1, PREDICTOR_DIM_MODEL],  # N, 2, B, D
-            dtype=tf.float32,
-        )
-        transcript = ""
-
+    with mic.recorder(samplerate=sample_rate) as mic:
         while True:
-            try:
-                data = mq.get()
-                text, prev_token, states = recognize(data, prev_token, states)
-                transcript += text
-                print(transcript, flush=True)
-            except queue.Empty:
-                pass
-
-    def streamer(mq):
-        global mic
-
-        with mic.recorder(samplerate=SAMPLE_RATE) as mic:
-            while True:
-                data = mic.record(numframes=CHUNK_SIZE)
-                mq.put(data)
-
-    tflite_process = Process(target=recognizer, args=[mq])
-    tflite_process.start()
-
-    audio_process = Process(target=streamer, args=[mq])
-    audio_process.start()
-
-    audio_process.join()
-    audio_process.close()
-
-    tflite_process.terminate()
+            data = mic.record(numframes=chunk_size)
+            text, prev_token, encoder_states, predictor_states = recognize(
+                data[:, 0], prev_token, encoder_states, predictor_states
+            )
+            transcript += text
+            print(transcript, flush=True)

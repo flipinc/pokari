@@ -82,7 +82,7 @@ class MockStream:
             )  # add batch dim
             chunk_audio_lens = tf.expand_dims(end_offset - start_offset, axis=0)
 
-            audio_features, _ = self.audio_featurizer(
+            audio_features = self.audio_featurizer.stream(
                 chunk_audio_signal, chunk_audio_lens
             )
 
@@ -150,7 +150,7 @@ class MockStream:
             )  # add batch dim
             chunk_audio_lens = tf.expand_dims(end_offset - start_offset, axis=0)
 
-            audio_features, _ = self.audio_featurizer(
+            audio_features = self.audio_featurizer.stream(
                 chunk_audio_signal, chunk_audio_lens
             )
 

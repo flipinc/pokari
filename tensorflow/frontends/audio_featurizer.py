@@ -51,10 +51,10 @@ class AudioFeaturizer:
 
         audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
 
-        # dither
-        if self.dither > 0:
-            # align dtype with x for amp (float16)
-            x += self.dither * tf.random.normal(tf.shape(x), dtype=x.dtype)
+        # TODO: dither is not supported because tflite does not support random.normal
+        # if self.dither > 0:
+        #     # align dtype with x for amp (float16)
+        #     x += self.dither * tf.random.normal(tf.shape(x), dtype=x.dtype)
 
         # preemph
         if self.preemph is not None:
@@ -126,6 +126,54 @@ class AudioFeaturizer:
 
         return x, audio_lens
 
+    def stream(self, audio_signals, audio_lens):
+        x = audio_signals
+        del audio_signals
+
+        if self.preemph is not None:
+            x = tf.concat(
+                (
+                    tf.expand_dims(x[:, 0], axis=1),
+                    x[:, 1:] - self.preemph * x[:, :-1],
+                ),
+                axis=1,
+            )
+
+        stfts = tf.signal.stft(
+            x,
+            frame_length=self.win_length,
+            frame_step=self.hop_length,
+            fft_length=self.n_fft,
+            pad_end=True,
+        )
+
+        spectrograms = tf.square(tf.abs(stfts))
+
+        mel_weight = tf.signal.linear_to_mel_weight_matrix(
+            num_mel_bins=self.n_mels,
+            num_spectrogram_bins=tf.shape(spectrograms)[-1],
+            sample_rate=self.sample_rate,
+            lower_edge_hertz=0.0,
+            upper_edge_hertz=(self.sample_rate / 2),
+        )
+
+        mel_spectrograms = tf.tensordot(spectrograms, mel_weight, 1)
+        del spectrograms, mel_weight
+
+        log_mel_spectrograms = tf.math.log(mel_spectrograms + 1e-9)
+        del mel_spectrograms
+
+        x = tf.transpose(log_mel_spectrograms, (0, 2, 1))
+        del log_mel_spectrograms
+
+        # TODO: optimize for streaming
+        if self.normalize_type is not None:
+            x = self.normalize(x, audio_lens)
+
+        x = tf.transpose(x, (0, 2, 1))
+
+        return x
+
     def normalize(self, x: tf.Tensor, audio_lens: tf.Tensor):
         """Normalize audio signal"""
 
@@ -182,3 +230,18 @@ class AudioFeaturizer:
             raise NotImplementedError(
                 f"{self.normalize_type} is not currently supported."
             )
+
+    # def librosa_stft(self):
+    #     if self.center:
+    #         signal = tf.pad(
+    #             signal, [[self.nfft // 2, self.nfft // 2]], mode="REFLECT"
+    #         )
+    #     window = tf.signal.hann_window(self.frame_length, periodic=True)
+    #     left_pad = (self.nfft - self.frame_length) // 2
+    #     right_pad = self.nfft - self.frame_length - left_pad
+    #     window = tf.pad(window, [[left_pad, right_pad]])
+    #     framed_signals = tf.signal.frame(
+    #         signal, frame_length=self.nfft, frame_step=self.frame_step
+    #     )
+    #     framed_signals *= window
+    #     return tf.square(tf.abs(tf.signal.rfft(framed_signals, [self.nfft])))
