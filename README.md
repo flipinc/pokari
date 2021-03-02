@@ -21,9 +21,10 @@ Following installations are required after Docker run:
 ### TFLite Conversion
 - As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
 `tensorflow.python.framework.errors_impl.InvalidArgumentError: Attempting to add a duplicate function with name`,
-it is highly likely that reverting back tensorflow version might solve some issues (or at least give you directions to solve them). It is confirmed that tensorflow 2.3.2
-works.
+it is highly likely that reverting back tensorflow version might solve some issues (or at least give you directions to solve them). It is confirmed that following tensorflow version works.
+    - tensorflow 2.3.2
 - tf.string is not supported in TFLite, so all models outputs Unicode instead.
+- Make sure the converter version matches with the runtime version to align operation versions
 
 ### Limitations on Tensorflow Version
 - Since warp_rnnt (optimized for CUDA for faster loss calculation) is not used, training time is much slower than PyTorch. It is desirable to use ![this library](https://github.com/HawkAaron/warp-transducer), but its required tensorflow version conflicts with RTX3090 which I am using for training.

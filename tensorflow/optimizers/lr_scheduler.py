@@ -28,8 +28,14 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         if warmup_ratio is not None and warmup_ratio > 1:
             raise ValueError("Warmup ratio must be less than 1.")
 
+        if hold_base_ratio is not None and hold_base_ratio > 1:
+            raise ValueError("Hold base ratio must be less than 1.")
+
         if warmup_steps > total_steps:
             raise ValueError("Warmup steps must be less than the total steps.")
+
+        if hold_base_steps > total_steps:
+            raise ValueError("Hold base steps must be less than the total steps.")
 
         self.learning_rate_base = learning_rate
         self.total_steps = total_steps

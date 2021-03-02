@@ -331,6 +331,9 @@ class SubwordFeaturizer(TextFeaturizer):
         Returns:
             unicode code points transcript with dtype tf.int32 and shape [None]
         """
+        if self.upoints is None:
+            self.__init_upoints()
+
         with tf.name_scope("indices2upoints"):
             indices = self.normalize_indices(indices)
             upoints = tf.gather_nd(self.upoints, tf.expand_dims(indices, axis=-1))

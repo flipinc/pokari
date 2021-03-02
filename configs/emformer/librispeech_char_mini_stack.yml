@@ -9,7 +9,7 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 1
+  log_interval: 100
   model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_vgg_no_bias.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_stack_temp.h5
@@ -78,11 +78,6 @@ optimizer:
     warmup_steps: 40000
     warmup_learning_rate: 1e-6
     hold_base_ratio: 0.6
-
-  variational_noise:
-    mean: 0
-    stddev: 0.075
-    start_step: -1
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder

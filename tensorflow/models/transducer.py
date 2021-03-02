@@ -65,9 +65,6 @@ class Transducer(tf.keras.Model):
             inference=self.inference,
         )
 
-        self.wer = ErrorRate(kind="wer")
-        self.cer = ErrorRate(kind="cer")
-
         # since in tensorflow 2.3 keras.metrics are registered as layers, models that
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
         # it is better to just disable all training logics when they are unused
@@ -224,6 +221,11 @@ class Transducer(tf.keras.Model):
         super(Transducer, self).fit(**self.fit_args)
 
     def _compile(self):
+        # since these have weights, we want them to only load in training time and
+        # not during tflite conversion
+        self.wer = ErrorRate(kind="wer")
+        self.cer = ErrorRate(kind="cer")
+
         if self.log_interval == 1 and self.compile_args["run_eagerly"] is False:
             raise ValueError("Logging with Graph mode is not supported")
 
@@ -428,7 +430,7 @@ class Transducer(tf.keras.Model):
         self, audio_signals, prev_tokens, cache_encoder_states, cache_predictor_states
     ):
         audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
-        audio_features, _ = self.audio_featurizer(audio_signals, audio_lens)
+        audio_features = self.audio_featurizer.stream(audio_signals, audio_lens)
 
         encoded_outs, cache_encoder_states = self.encoder.stream(
             audio_features, cache_encoder_states
@@ -455,13 +457,18 @@ class Transducer(tf.keras.Model):
         """Streaming tflite model for batch size = 1
         Args:
             audio_signal: [T]
-            prev_token: [1]
+            prev_token: []
             cache_encoder_states: size depends on encoder type
             cache_predictor_states: [N, 2, B, D_p]
+        Returns:
+            tf.Tensor: transcript with size [None]
+            tf.Tensor: last predicted token with size []
+            tf.Tensor: new encoder states. size depends on encoder type
+            tf.Tensor: new predictor states with size [N, 2, B, D_p]
         """
         audio_signal = tf.expand_dims(audio_signal, axis=0)  # add batch dim
         audio_len = tf.expand_dims(tf.shape(audio_signal)[1], axis=0)
-        audio_feature, _ = self.audio_featurizer.tf_extract(audio_signal, audio_len)
+        audio_feature = self.audio_featurizer.stream(audio_signal, audio_len)
 
         encoded_out, cache_encoder_states = self.encoder.stream(
             audio_feature, cache_encoder_states
@@ -475,9 +482,16 @@ class Transducer(tf.keras.Model):
             cache_states=cache_predictor_states,
         )
 
-        transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
+        # following script gives `ValueError: Invalid tensor size.` when running on
+        # TFLite interpreter. Or maybe if the audio is none, it outputs nothing and
+        # that would cause the output with invalid shape.
+        # transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
+        transcript = hypothesis.prediction
 
         return transcript, hypothesis.index, cache_encoder_states, hypothesis.states
+
+    def make_batch_tflite_function(self):
+        pass
 
     def make_one_tflite_function(self):
         return tf.function(

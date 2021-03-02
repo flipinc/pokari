@@ -311,6 +311,7 @@ class Inference:
             def body(_time, _hypothesis):
                 ytu, _states = self.decoder_inference(
                     # avoid using [index] in tflite
+                    # ref: https://github.com/TensorSpeech/TensorFlowASR/issues/17
                     encoded_out=tf.gather_nd(encoded_out, tf.reshape(_time, shape=[1])),
                     prev_token=_hypothesis.index,
                     cache_states=_hypothesis.states,

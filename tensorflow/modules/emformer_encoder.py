@@ -11,6 +11,8 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
     Some training tips for emformer
     - Gradient clipping is required for stable training
+    - (Only confirmed in PyTorch) to keep positional information, vgg
+    subsampling is preferred over stack subsampling
 
     """
 
@@ -608,7 +610,7 @@ class EmformerBlock(tf.keras.layers.Layer):
             attn_scores += -1e9 * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
             # TODO: does doing this improve accuracy?
-            # attn_probs = attn_probs * mask
+            attn_probs = attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
 

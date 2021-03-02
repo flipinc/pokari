@@ -45,12 +45,13 @@ class RNNTEncoder(tf.keras.layers.Layer):
         """Get zeros states
 
         Args:
-            batch_size: This is not needed for this encoder but all get_initial_state
-                must take this arg.
-            TODO: create meta class
+            batch_size: This is not needed for this encoder but all exportable encoders
+                must have this function.
+
+        TODO: create meta class for exportable encoders
 
         Returns:
-            tf.Tensor: states having shape [num_rnns, 1 or 2, 1, P]
+            tf.Tensor: states having shape [num_rnns, 1 or 2, 1, D]
         """
         states = []
         for block in self.blocks:
@@ -80,6 +81,8 @@ class RNNTEncoder(tf.keras.layers.Layer):
 
         for block in self.blocks:
             x = block(x, training=training)
+
+        tf.print(x[0])
 
         return x, audio_lens
 
