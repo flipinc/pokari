@@ -57,9 +57,11 @@ class TransducerJoint(tf.keras.layers.Layer):
 
         f = self.linear_encoder(encoder_outputs)
         f = tf.expand_dims(f, axis=2)  # [B, T, 1, D]
+        del encoder_outputs
 
         g = self.linear_predictor(predictor_outputs)
         g = tf.expand_dims(g, axis=1)  # [B, 1, U, D]
+        del predictor_outputs
 
         joint_inputs = self.activation(f + g)
         del f, g

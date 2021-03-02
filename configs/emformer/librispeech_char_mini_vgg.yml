@@ -1,13 +1,9 @@
-# emformer/20210224-142725
-# emformer_03_char_mini_vgg.h5
-# trainable params: 54,587,169
-
 base_model:
   _target_: models.transducer.Transducer
 
 trainer:
   devices: [0]
-  run_eagerly: false
+  run_eagerly: true
   batch_size: 4
   epochs: 100
   workers: 4
@@ -95,7 +91,7 @@ encoder:
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
-  subsampling: stack # frame stacking in paper
+  subsampling: vgg # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)

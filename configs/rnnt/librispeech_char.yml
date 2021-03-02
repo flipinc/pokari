@@ -2,6 +2,9 @@
 # rnnt_02_char.h5
 # trainable params: 62,051,613
 
+base_model:
+  _target_: models.transducer.Transducer
+
 trainer:
   devices: [0]
   run_eagerly: false
@@ -11,9 +14,9 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  model_path: outputs/tensorflow-done/checkpoints/rnnt_02_char.h5
+  # model_path: outputs/tensorflow-done/checkpoints/rnnt_02_char.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char_00_DONE.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char_01.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -73,7 +76,7 @@ optimizer:
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_ratio: 0.05
+    warmup_ratio: 0.05 # does not work with warmup step 40000
     warmup_learning_rate: 1e-6
     hold_base_ratio: 0.6
 

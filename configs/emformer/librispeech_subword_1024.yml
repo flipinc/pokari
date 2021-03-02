@@ -3,16 +3,16 @@ base_model:
 
 trainer:
   devices: [0]
-  run_eagerly: false
+  run_eagerly: true
   batch_size: 4
-  epochs: 100
+  epochs: 2
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: null
-  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mask.h5
+  log_interval: 100
+  model_path: outputs/tensorflow/checkpoints/emformer_01_subword_1.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_subword.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_subword_1.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000

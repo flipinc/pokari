@@ -1,7 +1,6 @@
 import queue
 
 import tensorflow as tf
-from utils.utils import get_reduced_length
 
 from modules.subsample import StackSubsample
 
@@ -17,6 +16,7 @@ class RNNTEncoder(tf.keras.layers.Layer):
         name: str = "rnnt_encoder",
         **kwargs,
     ):
+        """RNNT Encoder from https://arxiv.org/pdf/1811.06621.pdf"""
         super().__init__(name=name, **kwargs)
 
         reduction_q = queue.Queue()
@@ -73,7 +73,10 @@ class RNNTEncoder(tf.keras.layers.Layer):
             tf.Tensor: [B, T, D]
 
         """
-        audio_lens = get_reduced_length(audio_lens, self.time_reduction_factor)
+        audio_lens = tf.cast(
+            tf.math.ceil(tf.divide(audio_lens, self.time_reduction_factor)),
+            dtype=tf.int32,
+        )
 
         for block in self.blocks:
             x = block(x, training=training)
@@ -113,9 +116,10 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         reduction_factor: int = 0,
         dim_model: int = 640,
         num_units: int = 2048,
+        name="rnnt_encoder_block",
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(name=name, **kwargs)
 
         if reduction_factor > 0:
             self.reduction = StackSubsample(
