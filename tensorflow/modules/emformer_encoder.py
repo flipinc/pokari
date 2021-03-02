@@ -618,14 +618,12 @@ class EmformerBlock(tf.keras.layers.Layer):
         output = tf.matmul(attn_probs, v)
         output = tf.transpose(output, [0, 2, 1, 3])
         output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
-        output += x
-        attn_out = self.ln_out_1(output)
+        attn_out = output + x
+        output = self.ln_out_1(attn_out)
 
         # 4. FFN module in transformer
-        output = self.linear_out_1(attn_out)
+        output = self.linear_out_1(output)
         output = self.linear_out_2(output)
-        # TODO: original emformer's impl is slightly different as output before ln_out_1
-        # is added as residual
         output += attn_out
         output = self.ln_out_2(output)
 

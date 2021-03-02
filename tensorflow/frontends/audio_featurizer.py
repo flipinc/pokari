@@ -17,6 +17,13 @@ class AudioFeaturizer:
         dither: float = 1e-5,
         pad_to: int = 8,
     ):
+        """
+
+        Args:
+            normalize_type: `per_feature` is preferrable as its value range become more
+            contained compared to `per_signal`.
+
+        """
         self.sample_rate = sample_rate
         self.win_length = int(window_size * sample_rate)
         self.hop_length = int(window_stride * sample_rate)
@@ -37,7 +44,7 @@ class AudioFeaturizer:
 
         Returns:
             tf.Tensor: batch audio features [B, T, n_mels]
-            tf.int32: btach audio lengths [B]
+            tf.int32: batch audio lengths [B]
         """
         x = audio_signals
         del audio_signals
@@ -156,6 +163,21 @@ class AudioFeaturizer:
             # make sure x_std is not zero
             x_std += CONSTANT
             return (x - tf.expand_dims(x_mean, axis=2)) / tf.expand_dims(x_std, axis=2)
+        elif self.normalize_type == "per_signal":
+            new_x = tf.TensorArray(
+                tf.float32,
+                size=bs,
+                clear_after_read=True,
+            )
+
+            for i in range(bs):
+                mean = tf.math.reduce_mean(x[i])
+                std = tf.math.reduce_std(x[i])
+                # make sure x_std is not zero
+                std += CONSTANT
+                new_x = new_x.write(i, (x[i] - mean) / std)
+
+            return new_x.stack()
         else:
             raise NotImplementedError(
                 f"{self.normalize_type} is not currently supported."
