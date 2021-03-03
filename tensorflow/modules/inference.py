@@ -103,9 +103,7 @@ class Inference:
             else tf.fill([bs, 1], self.text_featurizer.blank)
         )
 
-        blank_indices = tf.fill([bs], 0)
         blank_mask = tf.fill([bs], 0)
-        one = tf.constant(1, tf.int32)
         zero = tf.constant(0, tf.int32)
         states = (
             cache_states
@@ -147,44 +145,21 @@ class Inference:
                 if tf.reduce_all(tf.cast(blank_mask, tf.bool)):
                     is_blank = tf.constant(1, tf.int32)
                 else:
-                    blank_indices = tf.squeeze(
-                        tf.where(tf.cast(blank_mask, tf.int32)),
-                        axis=-1,
-                    )
-                    non_blank_indices = tf.squeeze(
-                        tf.where(tf.cast(tf.not_equal(blank_mask, one), tf.int32)),
-                        axis=-1,
-                    )
-                    # index -> order in which actual value can be retrieved in order
-                    ordered_indicies = tf.argsort(
-                        # index -> which value is located at that index
-                        tf.concat([blank_indices, non_blank_indices], axis=0)
-                    )
-
                     # recover prior state for all samples which predicted blank now/past
-                    unchanged_states = tf.gather(states, blank_indices, axis=2)
-                    changed_states = tf.gather(next_states, non_blank_indices, axis=2)
-
-                    unordered_next_states = tf.concat(
-                        [unchanged_states, changed_states], axis=2
+                    states_blank_mask = tf.cast(
+                        tf.reshape(blank_mask, [1, 1, bs, 1]), tf.float32
                     )
-                    next_states = tf.gather(
-                        unordered_next_states, ordered_indicies, axis=2
-                    )
+                    unchanged_states = states * states_blank_mask
+                    inverse_states_blank_mask = states_blank_mask * -1.0 + 1.0
+                    changed_states = next_states * inverse_states_blank_mask
+                    next_states = unchanged_states + changed_states
 
                     # recover prior predicted label for all samples which predicted
-                    # blank now/past
-                    unchanged_symbols = tf.gather(last_label, blank_indices)
-                    # [?, 1] -> [?], where ? is the number of blank_indices
-                    unchanged_symbols = tf.squeeze(unchanged_symbols, axis=-1)
-                    changed_symbols = tf.gather(symbols, non_blank_indices)
-
-                    unordered_next_symbols = tf.concat(
-                        [unchanged_symbols, changed_symbols], axis=0
-                    )
-                    next_symbols = tf.gather(
-                        unordered_next_symbols, ordered_indicies, axis=0
-                    )
+                    symbol_blank_mask = blank_mask
+                    unchanged_symbols = tf.squeeze(last_label, axis=-1) * blank_mask
+                    inverse_symbol_blank_mask = symbol_blank_mask * -1 + 1
+                    changed_symbols = symbols * inverse_symbol_blank_mask
+                    next_symbols = unchanged_symbols + changed_symbols
 
                     # update new label and hidden state for next iteration
                     last_label = tf.expand_dims(next_symbols, axis=-1)

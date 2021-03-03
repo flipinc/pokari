@@ -58,7 +58,7 @@ audio_feature:
   n_mels: &n_mels 80
   preemph: 0.97
   dither: 1e-5
-  pad_to: 8
+  pad_to: 16
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
@@ -86,6 +86,7 @@ encoder:
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
+  dropout_ffn: 0.1
   subsampling: stack # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf

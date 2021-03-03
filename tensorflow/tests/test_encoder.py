@@ -16,6 +16,7 @@ cfg = OmegaConf.create(
         "dim_model": 512,
         "dim_ffn": 2048,
         "dropout_attn": 0.1,
+        "dropout_ffn": 0.1,
         "left_length": 20,
         "chunk_length": 32,
         "right_length": 8,

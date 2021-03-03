@@ -51,6 +51,9 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
             else hold_base_steps
         )
 
+        # for visualization
+        self.value = None
+
     def __call__(self, global_step):
         learning_rate = (
             0.5
@@ -92,4 +95,6 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
                 global_step < self.warmup_steps, warmup_rate, learning_rate
             )
 
-        return tf.where(global_step > self.total_steps, 0.0, learning_rate)
+        self.value = tf.where(global_step > self.total_steps, 0.0, learning_rate)
+
+        return self.value
