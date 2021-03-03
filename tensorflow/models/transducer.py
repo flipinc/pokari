@@ -69,6 +69,9 @@ class Transducer(tf.keras.Model):
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
         # it is better to just disable all training logics when they are unused
         if setup_training:
+            self.wer = ErrorRate(kind="wer")
+            self.cer = ErrorRate(kind="cer")
+
             self.debugging = (
                 cfgs.trainer.debugging if "debugging" in cfgs.trainer else None
             )
@@ -174,6 +177,7 @@ class Transducer(tf.keras.Model):
                 total_steps=total_steps,
                 learning_rate=learning_rate,
             )
+            # TODO: not every learning rate scheduler supports warmup steps
             self.warmup_steps = lr.warmup_steps
         else:
             lr = learning_rate
@@ -182,7 +186,7 @@ class Transducer(tf.keras.Model):
         if optimizer_type == "adam":
             optimizer = tf.keras.optimizers.Adam(lr, **optim_cfg)
         elif optimizer_type == "adamw":
-            # TODO: For weight decay, the value of weight decay must be decayed too!
+            # TODO: the value of weight decay must be decayed too!
             # https://www.tensorflow.org/addons/api_docs/python/tfa/optimizers/AdamW
             optimizer = tfa.optimizers.AdamW(learning_rate=lr, **optim_cfg)
         else:
@@ -221,14 +225,6 @@ class Transducer(tf.keras.Model):
         super(Transducer, self).fit(**self.fit_args)
 
     def _compile(self):
-        # since these have weights, we want them to only load in training time and
-        # not during tflite conversion
-        self.wer = ErrorRate(kind="wer")
-        self.cer = ErrorRate(kind="cer")
-
-        if self.log_interval == 1 and self.compile_args["run_eagerly"] is False:
-            raise ValueError("Logging with Graph mode is not supported")
-
         super(Transducer, self).compile(**self.compile_args)
 
     def call(self, inputs, training=False):
@@ -259,10 +255,6 @@ class Transducer(tf.keras.Model):
             "encoded_outs": encoded_outs,
         }
 
-    # in order to use AutoGraph feature (control flow conversions and so on),
-    # explicitly calling tf.function is required. This will be useful when implementing
-    # variational noise in the future
-    # ref: https://github.com/tensorflow/tensorflow/issues/42119#issuecomment-747098474
     def train_step(self, batch):
         x, y_true = batch
 
@@ -286,66 +278,98 @@ class Transducer(tf.keras.Model):
         else:
             gradients = tape.gradient(loss, self.trainable_weights)
 
-        # add variational noise for better generalization to out-of-domain data
-        # ref: https://arxiv.org/pdf/2005.03271v1.pdf
-        # TODO: after gradient clipping or before gradient clipping
-        # TODO: make this work in train_step. currently since auto-graph is set to
-        # false (see the comment at `train_step`), this script does not work
-        # if self.variational_noise_cfg is not None:
-        #     start_step = self.variational_noise_cfg["start_step"]
+        gradients = self.on_gradient_computed(gradients)
 
-        #     if tf.equal(start_step, -1):
-        #         start_step = self.warmup_steps
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
-        #     if tf.less_equal(start_step, self.step_counter):
-        #         new_gradients = []
+        learning_rate = (
+            self.optimizer.lr.value
+            if self.warmup_steps is not None  # if lr_scheduler is enabled
+            else self.optimizer.lr
+        )
 
-        #         for grad in gradients:
-        #             values = tf.convert_to_tensor(
-        #                 grad.values if isinstance(grad, tf.IndexedSlices) else grad
-        #             )
+        tensorboard_logs = {"loss": loss, "lr": learning_rate}
 
-        #             noise = tf.random.normal(
-        #                 tf.shape(values),
-        #                 mean=self.variational_noise_cfg.get("mean", 0),
-        #                 stddev=self.variational_noise_cfg.get("stddev", 0.05),
-        #                 dtype=values.dtype,
-        #             )
-        #             values = tf.add(grad, noise)
+        self.on_step_end(
+            labels=y_true["labels"],
+            encoded_outs=y_pred["encoded_outs"],
+            logit_lens=y_pred["logit_lens"],
+        )
 
-        #             if isinstance(grad, tf.IndexedSlices):
-        #                 values = tf.IndexedSlices(
-        #                     values, grad.indices, grad.dense_shape
-        #                 )
+        self.step_counter += 1
 
-        #             new_gradients.append(values)
+        return tensorboard_logs
 
-        #         gradients = new_gradients
-
+    # keras `train_step` is run in graph mode, however, autograph feature is turned off.
+    # in order to use autograph feature, explicitly calling tf.function is required.
+    # this is why this function is separated from `train_step`
+    # ref: https://github.com/tensorflow/tensorflow/issues/42119#issuecomment-747098474
+    @tf.function
+    def on_gradient_computed(self, gradients):
         if self.gradient_clip_val is not None:
             high = self.gradient_clip_val
             low = self.gradient_clip_val * -1
             gradients = [(tf.clip_by_value(grad, low, high)) for grad in gradients]
+
+        # add variational noise for better generalization to out-of-domain data
+        # ref: https://arxiv.org/pdf/2005.03271v1.pdf
+        if self.variational_noise_cfg is not None:
+            start_step = self.variational_noise_cfg["start_step"]
+
+            if tf.equal(start_step, -1):
+                start_step = self.warmup_steps
+
+            if tf.less_equal(start_step, self.step_counter):
+                new_gradients = []
+
+                for grad in gradients:
+                    values = tf.convert_to_tensor(
+                        grad.values if isinstance(grad, tf.IndexedSlices) else grad
+                    )
+
+                    noise = tf.random.normal(
+                        tf.shape(values),
+                        mean=self.variational_noise_cfg.get("mean", 0),
+                        stddev=self.variational_noise_cfg.get("stddev", 0.01),
+                        dtype=values.dtype,
+                    )
+                    values = tf.add(grad, noise)
+
+                    if isinstance(grad, tf.IndexedSlices):
+                        values = tf.IndexedSlices(
+                            values, grad.indices, grad.dense_shape
+                        )
+
+                    new_gradients.append(values)
+
+                gradients = new_gradients
 
         if self.debugging:
             tf.print("Checking gradients value...")
             for grad in gradients:
                 tf.debugging.check_numerics(grad, "Gradients have invalid value!!")
 
-        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        return gradients
 
-        tensorboard_logs = {"loss": loss}
+    # TODO: this is definitely not the right way to use input signature
+    @tf.function(
+        input_signature=[
+            tf.TensorSpec([None, None], dtype=tf.int32),
+            tf.TensorSpec([None, None, None], dtype=tf.float32),
+            tf.TensorSpec([None], dtype=tf.int32),
+        ]
+    )
+    def on_step_end(self, labels, encoded_outs, logit_lens):
+        """
 
-        # TODO: This code can be executed only in eager mode. so for graph mode,
-        # log_interval must be > 1 for tracing to be disabled
-        if (
-            self.log_interval is not None
-            and (self.step_counter + 1) % self.log_interval == 0
+        TODO: Currently, because logging is not done at every step and graph mode
+        requires this func's output to be consistent, tensorboard logging is not
+        supported. Do something about it
+
+        """
+        if self.log_interval is not None and tf.equal(
+            tf.math.floormod(self.step_counter + 1, self.log_interval), 0
         ):
-            labels = y_true["labels"]
-            encoded_outs = y_pred["encoded_outs"]
-            logit_lens = y_pred["logit_lens"]
-
             results, _, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
 
             tf.print("❓ PRED: \n", results[0])
@@ -356,19 +380,11 @@ class Transducer(tf.keras.Model):
                 ),
             )
 
-            self.wer.update_state(results, tf.strings.unicode_encode(labels, "UTF-8"))
-            self.cer.update_state(results, tf.strings.unicode_encode(labels, "UTF-8"))
+            # wer = self.wer(results, tf.strings.unicode_encode(labels, "UTF-8"))
+            cer = self.cer(results, tf.strings.unicode_encode(labels, "UTF-8"))
 
-            tensorboard_logs.update({"wer": self.wer.result()})
-            tensorboard_logs.update({"cer": self.cer.result()})
-
-            # Average over each interval
-            self.wer.reset_states()
-            self.cer.reset_states()
-
-        self.step_counter += 1
-
-        return tensorboard_logs
+            # tf.print("📕 WER: ", wer)
+            tf.print("📘 CER: ", cer)
 
     def test_step(self, batch):
         x, y_true = batch
@@ -482,11 +498,10 @@ class Transducer(tf.keras.Model):
             cache_states=cache_predictor_states,
         )
 
-        # following script gives `ValueError: Invalid tensor size.` when running on
-        # TFLite interpreter. Or maybe if the audio is none, it outputs nothing and
-        # that would cause the output with invalid shape.
-        # transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
-        transcript = hypothesis.prediction
+        # TODO: Right now, if no audio is given, it outputs empty `transcript`. This
+        # will cause an error because tflite expects `transcript` to have a shape.
+        # If you see `ValueError: Invalid tensor size.`, thats the error message.
+        transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
 
         return transcript, hypothesis.index, cache_encoder_states, hypothesis.states
 

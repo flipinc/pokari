@@ -61,7 +61,7 @@ audio_feature:
   n_mels: &n_mels 80
   preemph: 0.97
   dither: 1e-5
-  pad_to: 8
+  pad_to: 16
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer

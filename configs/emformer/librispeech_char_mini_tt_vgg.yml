@@ -11,10 +11,10 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 100
-  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_vgg_no_bias.h5
+  log_interval: 1000
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_stack_temp.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt_vgg.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -60,7 +60,7 @@ audio_feature:
   n_mels: &n_mels 80
   preemph: 0.97
   dither: 1e-5
-  pad_to: 8
+  pad_to: 16
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
@@ -69,11 +69,9 @@ text_feature:
 
 optimizer:
   name: adam
-  learning_rate: 0.0005
+  learning_rate: 0.00025
   beta_1: 0.9
   beta_2: 0.999
-
-  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
@@ -93,6 +91,7 @@ encoder:
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
+  dropout_ffn: 0.1
   subsampling: vgg # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf

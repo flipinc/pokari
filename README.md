@@ -28,8 +28,6 @@ it is highly likely that reverting back tensorflow version might solve some issu
 
 ### Limitations on Tensorflow Version
 - Since warp_rnnt (optimized for CUDA for faster loss calculation) is not used, training time is much slower than PyTorch. It is desirable to use ![this library](https://github.com/HawkAaron/warp-transducer), but its required tensorflow version conflicts with RTX3090 which I am using for training.
-- Gradient variational noise is not implemented yet
-- CTC is not perfectly implemented yet
 - Mixed precision training is not supported yet
 
 ### Advice

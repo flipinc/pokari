@@ -1,18 +1,20 @@
+# optimizer config based on Transformer Transducer https://arxiv.org/pdf/2002.02562.pdf
+
 base_model:
   _target_: models.transducer.Transducer
 
 trainer:
   devices: [0]
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 100
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 100
-  # model_path: outputs/tensorflow/checkpoints/emformer_02_char_mini_vgg_new.h5
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_vgg.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -67,27 +69,30 @@ text_feature:
 
 optimizer:
   name: adam
-  learning_rate: 0.0005
+  learning_rate: 0.00025
   beta_1: 0.9
   beta_2: 0.999
-
-  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_steps: 40000
+    warmup_steps: 4000
     warmup_learning_rate: 1e-6
-    hold_base_steps: 0.6
+    hold_base_steps: 30000
+
+  variational_noise:
+    mean: 0
+    stddev: 0.01
+    start_step: 10000
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
-  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
   dropout_attn: 0.1
   dropout_ffn: 0.1
-  subsampling: vgg # frame stacking in paper
+  subsampling: stack # frame stacking in paper
   subsampling_factor: 4
   subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf
   left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)

@@ -23,6 +23,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         dim_model: int,
         dim_ffn: int,
         dropout_attn: int,
+        dropout_ffn: int,
         subsampling: str,
         subsampling_factor: int,
         subsampling_dim: int,
@@ -68,6 +69,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 dim_model=self.dim_model,
                 dim_ffn=dim_ffn,
                 dropout_attn=dropout_attn,
+                dropout_ffn=dropout_ffn,
                 left_length=self.left_length,
                 chunk_length=self.chunk_length,
                 right_length=self.right_length,
@@ -550,7 +552,9 @@ class EmformerBlock(tf.keras.layers.Layer):
     """
 
     Transformer modules is referenced from
+    https://arxiv.org/pdf/1910.12977.pdf
     https://github.com/Kyubyong/transformer/blob/master/modules.py
+
 
     """
 
@@ -560,6 +564,7 @@ class EmformerBlock(tf.keras.layers.Layer):
         dim_model: int,
         dim_ffn: int,
         dropout_attn: int,
+        dropout_ffn: int,
         left_length: int,
         chunk_length: int,
         right_length: int,
@@ -583,6 +588,9 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.linear_v = tf.keras.layers.Dense(dim_model)
 
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
+
+        self.linear_dropout_1 = tf.keras.layers.Dropout(dropout_ffn)
+        self.linear_dropout_2 = tf.keras.layers.Dropout(dropout_ffn)
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
@@ -621,13 +629,15 @@ class EmformerBlock(tf.keras.layers.Layer):
         output = tf.transpose(output, [0, 2, 1, 3])
         output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
         attn_out = output + x
-        output = self.ln_out_1(attn_out)
+        output = self.ln_out_1(attn_out, training=training)
 
         # 4. FFN module in transformer
         output = self.linear_out_1(output)
+        output = self.linear_dropout_1(output, training=training)
         output = self.linear_out_2(output)
+        output = self.linear_dropout_2(output, training=training)
         output += attn_out
-        output = self.ln_out_2(output)
+        output = self.ln_out_2(output, training=training)
 
         return output
 

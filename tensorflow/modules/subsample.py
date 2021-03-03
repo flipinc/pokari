@@ -15,12 +15,20 @@ class VggSubsample(tf.keras.layers.Layer):
         bias_regularizer=None,
         name: str = "vgg_subsample",
     ):
+        """Causal Vgg subsampling introduced in https://arxiv.org/pdf/1910.12977.pdf
+        Args:
+            subsampling_factor (int): subsampling factor which should be a power of 2
+            feat_in (int): size of the input features
+            feat_out (int): size of the output features
+            conv_channels (int): Number of channels for the convolution layers.
+
+        Note: Conv2D on CPU does not support NCHW format
+        """
         super().__init__(name=name)
 
         self.sampling_num = int(math.log(subsampling_factor, 2))
 
         kernel_size = 3
-        self.left_padding = kernel_size - 1
         self.pool_strides = 2
 
         self.data_format = data_format
@@ -31,7 +39,7 @@ class VggSubsample(tf.keras.layers.Layer):
                 filters=conv_channels,
                 kernel_size=kernel_size,
                 strides=1,
-                padding="same",
+                padding="valid",
                 activation="relu",
                 data_format=data_format,
                 kernel_regularizer=kernel_regularizer,
@@ -42,7 +50,7 @@ class VggSubsample(tf.keras.layers.Layer):
                 filters=conv_channels,
                 kernel_size=kernel_size,
                 strides=1,
-                padding="same",
+                padding="valid",
                 activation="relu",
                 data_format=data_format,
                 kernel_regularizer=kernel_regularizer,
@@ -90,8 +98,11 @@ class VggSubsample(tf.keras.layers.Layer):
             # 1.2 add channel dimension -> [B, Tmax, D, 1]
             x = tf.expand_dims(x, axis=-1)
 
+        # 2. causal convolution
         for layer in self.layers:
+            x = tf.pad(x, [[0, 0], [2, 0], [1, 1], [0, 0]])  # kernel_size - 1 = 2
             x = layer["conv1"](x, training=training)
+            x = tf.pad(x, [[0, 0], [2, 0], [1, 1], [0, 0]])
             x = layer["conv2"](x, training=training)
             x = layer["pool"](x, training=training)
 
