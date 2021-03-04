@@ -72,3 +72,4 @@ optimizer:
 
 encoder:
   _target_: modules.jasper_encoder.JasperEncoder
+  num_sub_blocks: 2

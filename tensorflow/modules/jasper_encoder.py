@@ -54,7 +54,7 @@ class JasperEncoder(tf.keras.Model):
                 bias_regularizer=bias_regularizer,
                 name=f"{self.name}_block_{i}",
             )
-            for i in range(len(main_block_channels))
+            for i in range(num_sub_blocks)
         ]
 
         self.second_block = JasperSubBlock(
