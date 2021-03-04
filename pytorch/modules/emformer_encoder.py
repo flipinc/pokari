@@ -323,6 +323,7 @@ class EmformerBlock(nn.Module):
         left_length: int,
         chunk_length: int,
         right_length: int,
+        dropout_ffn: int = 0.1,
     ):
         super().__init__()
 
@@ -342,6 +343,11 @@ class EmformerBlock(nn.Module):
         self.linear_v = nn.Linear(dim_model, dim_model)
 
         self.attn_dropout = nn.Dropout(dropout_attn)
+
+        self.linear_dropput_1 = nn.Dropout(dropout_ffn)
+        self.linear_dropput_2 = nn.Dropout(dropout_ffn)
+
+        self.relu = nn.ReLU()
 
         self.linear_out_1 = nn.Linear(dim_model, dim_ffn)
         self.linear_out_2 = nn.Linear(dim_ffn, dim_model)
@@ -376,7 +382,11 @@ class EmformerBlock(nn.Module):
 
         # 5. feed forward and add residual
         output = self.linear_out_1(output)
-        output = self.linear_out_2(output) + attn_out
+        output = self.relu(output)
+        output = self.linear_dropput_1(output)
+        output = self.linear_out_2(output)
+        output = self.linear_dropput_2(output)
+        output += attn_out
 
         # 6. layer norm
         output = self.ln_out_2(output)
@@ -385,7 +395,7 @@ class EmformerBlock(nn.Module):
 
     def stream(
         self,
-        input: torch.Tensor,
+        x: torch.Tensor,
         mask: torch.Tensor,
         cache_k: torch.Tensor,
         cache_v: torch.Tensor,
@@ -404,10 +414,10 @@ class EmformerBlock(nn.Module):
             cache_k (torch.Tensor): [N, B, H, L, D/H]
             cache_v (torch.Tensor): [N, B, H, L, D/H]
         """
-        bs = input.size(0)
+        bs = x.size(0)
 
         # 1. apply layer norm
-        input = self.ln_in(input)
+        input = self.ln_in(x)
 
         # 2. calculate q -> [B, H, C+R, D]
         q = self.linear_q(input).view(bs, -1, self.num_heads, self.d_k)
@@ -429,15 +439,15 @@ class EmformerBlock(nn.Module):
         ]
         v = v.transpose(1, 2)
 
-        output = self.attend(input, q, k, v, mask)
+        output = self.attend(x, q, k, v, mask)
 
         return output, (cache_k, cache_v)
 
-    def full_context(self, input: torch.Tensor, mask: torch.Tensor):
-        bs = input.size(0)
+    def full_context(self, x: torch.Tensor, mask: torch.Tensor):
+        bs = x.size(0)
 
         # 1. perform layer norm
-        input = self.ln_in(input)
+        input = self.ln_in(x)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
         q = self.linear_q(input).view(bs, -1, self.num_heads, self.d_k)
@@ -447,7 +457,7 @@ class EmformerBlock(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
 
-        output = self.attend(input, q, k, v, mask)
+        output = self.attend(x, q, k, v, mask)
 
         return output, None
 

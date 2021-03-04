@@ -98,6 +98,7 @@ predictor:
   num_layers: 2 # 2 in paper
   embed_dim: 256 # 256 in paper
   dim_model: 512 # 512 in paper
+  dropout: 0.1
   random_state_sampling: true
 
 joint:

@@ -6,7 +6,7 @@ Hypothesis = collections.namedtuple("Hypothesis", ("index", "prediction", "state
 
 
 class Inference:
-    def __init__(self, text_featurizer, predictor, joint, max_symbols: int = 1):
+    def __init__(self, text_featurizer, predictor, joint, max_symbols: int = 30):
         super().__init__()
 
         self.text_featurizer = text_featurizer

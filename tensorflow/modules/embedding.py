@@ -12,6 +12,7 @@ class Embedding(tf.keras.layers.Layer):
         **kwargs
     ):
         """
+        Keras embedding layer is not supported for TFLite.
 
         TODO: Add mask zero just like native Embedding impl
 

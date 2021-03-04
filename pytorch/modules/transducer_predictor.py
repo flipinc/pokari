@@ -79,10 +79,6 @@ class TransducerPredictor(nn.Module):
             dropout=dropout,
         )
 
-        # torchscript does not support next(self.parameters()). this is
-        # a workaround
-        self.dummy_param = nn.Parameter(torch.empty(0))
-
     def forward(
         self,
         targets,
@@ -164,8 +160,9 @@ class TransducerPredictor(nn.Module):
 
         """
         # Get device and dtype of current module
-        device = self.dummy_param.device
-        dtype = self.dummy_param.dtype
+        _p = next(self.parameters())
+        device = _p.device
+        dtype = _p.dtype
 
         # If y is not None, it is of shape [B, U] with dtype long.
         if y is not None:

@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-class TransducerJoint(tf.keras.layers.Layer):
+class TransducerJoint(tf.keras.Model):
     """
 
     TODO: Sometimes, encoder/predictor dim is not always equal to linear layer dim in
@@ -48,9 +48,9 @@ class TransducerJoint(tf.keras.layers.Layer):
     def call(self, inputs, training=False, **kwargs):
         """
 
-        encoder_outputs: [B, T, D_e]
-        predictor_outputs: [B, U, D_p]
-
+        Args:
+            encoder_outputs: [B, T, D_e]
+            predictor_outputs: [B, U, D_p]
 
         """
         encoder_outputs, predictor_outputs = inputs

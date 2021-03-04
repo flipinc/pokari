@@ -5,7 +5,7 @@ import tensorflow as tf
 from modules.subsample import StackSubsample
 
 
-class RNNTEncoder(tf.keras.layers.Layer):
+class RNNTEncoder(tf.keras.Model):
     def __init__(
         self,
         reduction_indices: list = [0, 1],
@@ -81,8 +81,6 @@ class RNNTEncoder(tf.keras.layers.Layer):
 
         for block in self.blocks:
             x = block(x, training=training)
-
-        tf.print(x[0])
 
         return x, audio_lens
 
