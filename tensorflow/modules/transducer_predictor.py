@@ -3,13 +3,14 @@ import tensorflow as tf
 from modules.embedding import Embedding
 
 
-class TransducerPredictor(tf.keras.layers.Layer):
+class TransducerPredictor(tf.keras.Model):
     def __init__(
         self,
         num_classes: int,
         num_layers: int,
         dim_model: int,
         embed_dim: int,
+        dropout: int,
         random_state_sampling: bool,
         name="transducer_predictor",
         **kwargs,
@@ -40,8 +41,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 return_state=True,
                 name=f"{name}_lstm_{i}",
             )
-            ln = tf.keras.layers.LayerNormalization(name=f"{name}_ln_{i}")
-            self.rnns.append({"rnn": rnn, "ln": ln})
+            do = tf.keras.layers.Dropout(dropout)
+            self.rnns.append({"rnn": rnn, "dropout": do})
 
     def get_initial_state(self, batch_size: int, training: bool = False):
         """
@@ -105,7 +106,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 mask=mask,
                 initial_state=tf.unstack(states[idx], axis=0),
             )
-            x = rnn["ln"](x, training=training)
+            x = rnn["dropout"](x, training=training)
 
         return x
 
@@ -128,6 +129,5 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 x, training=False, initial_state=tf.unstack(states[idx], axis=0)
             )
             new_states.append(tf.stack([h, c]))
-            x = rnn["ln"](x, training=False)
 
         return x, tf.stack(new_states, axis=0)

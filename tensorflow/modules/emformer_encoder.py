@@ -6,7 +6,7 @@ import tensorflow as tf
 from modules.subsample import StackSubsample, VggSubsample
 
 
-class EmformerEncoder(tf.keras.layers.Layer):
+class EmformerEncoder(tf.keras.Model):
     """
 
     Some training tips for emformer
@@ -62,9 +62,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 name=f"{self.name}_vgg_subsample",
             )
 
-        self.layers = []
+        self.blocks = []
         for i in range(self.num_layers):
-            layer = EmformerBlock(
+            block = EmformerBlock(
                 num_heads=self.num_heads,
                 dim_model=self.dim_model,
                 dim_ffn=dim_ffn,
@@ -75,7 +75,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
                 right_length=self.right_length,
                 name=f"{self.name}_{i}_block",
             )
-            self.layers.append(layer)
+            self.blocks.append(block)
 
     def punch_out_ones(
         self,
@@ -475,10 +475,10 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 2. subsampling
         x = self.subsample(x)
 
-        # 3. loop over layers while saving cache at the same time
+        # 3. loop over blocks while saving cache at the same time
         new_cache_k = new_cache_v = []
-        for i, layer in enumerate(self.layers):
-            x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
+        for i, block in enumerate(self.blocks):
+            x, (temp_cache_k, temp_cache_v) = block.stream(x, cache[0][i], cache[1][i])
             new_cache_k.append(temp_cache_k)
             new_cache_v.append(temp_cache_v)
 
@@ -538,9 +538,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
         x_right = tf.gather(x, right_indexes, axis=1)
         x = tf.concat([x_right, x], axis=1)
 
-        # 5. loop over layers.
-        for layer in self.layers:
-            x = layer(x, mask, training)
+        # 5. loop over blocks.
+        for block in self.blocks:
+            x = block(x, mask, training)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]

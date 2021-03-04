@@ -82,12 +82,12 @@ class AudioFeaturizer:
                 fft_length=self.n_fft,
                 pad_end=True,
             )
-        elif self.stft_type == "librosa":
-            stfts = tf.map_fn(self.librosa_stft, x)
 
-        # stft returns real & imag, so convert to magnitude
-        # x1 for energy spectrogram, x2 for power spectrum
-        spectrograms = tf.square(tf.abs(stfts))
+            # stft returns real & imag, so convert to magnitude
+            # x1 for energy spectrogram, x2 for power spectrum
+            spectrograms = tf.square(tf.abs(stfts))
+        elif self.stft_type == "librosa":
+            spectrograms = tf.map_fn(self.librosa_stft, x)
 
         # [nfft/2 + 1, n_mel]
         mel_weight = tf.signal.linear_to_mel_weight_matrix(
@@ -130,8 +130,6 @@ class AudioFeaturizer:
 
         # [B, T, n_mels]
         x = tf.transpose(x, (0, 2, 1))
-
-        tf.print("🐳", x[0], tf.reduce_mean(x), tf.reduce_max(x), tf.reduce_min(x))
 
         return x, audio_lens
 
@@ -246,11 +244,12 @@ class AudioFeaturizer:
         Librosa center pads the signal with reflection whereas tensorflow pad from right
         with zeros by default.
 
+        TODO: this function is not tested, so do not use yet.
+
         """
-        if self.center:
-            signal = tf.pad(
-                audio_signal, [[self.n_fft // 2, self.n_fft // 2]], mode="REFLECT"
-            )
+        signal = tf.pad(
+            audio_signal, [[self.n_fft // 2, self.n_fft // 2]], mode="REFLECT"
+        )
         window = tf.signal.hann_window(self.win_length, periodic=True)
         left_pad = (self.n_fft - self.win_length) // 2
         right_pad = self.n_fft - self.win_length - left_pad
@@ -259,4 +258,5 @@ class AudioFeaturizer:
             signal, frame_length=self.n_fft, frame_step=self.hop_length
         )
         framed_signals *= window
-        return tf.signal.rfft(framed_signals, [self.n_fft])
+
+        return tf.square(tf.abs(tf.signal.rfft(framed_signals, [self.n_fft])))

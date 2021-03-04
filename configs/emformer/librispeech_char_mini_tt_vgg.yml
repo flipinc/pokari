@@ -12,7 +12,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 1000
-  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
+  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt_vgg.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt_vgg.h5
     save_best_only: true
@@ -72,6 +72,8 @@ optimizer:
   learning_rate: 0.00025
   beta_1: 0.9
   beta_2: 0.999
+
+  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
@@ -104,6 +106,7 @@ predictor:
   num_layers: 1 # 2 in paper
   embed_dim: 320 # 256 in paper
   dim_model: 320 # 512 in paper
+  dropout: 0.1
   random_state_sampling: true
 
 joint:

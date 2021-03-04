@@ -98,6 +98,7 @@ predictor:
   num_layers: 2
   embed_dim: 320
   dim_model: 1024
+  dropout: 0.1
   random_state_sampling: true
 
 joint:

@@ -5,8 +5,8 @@ from tensorflow.python.keras.utils import losses_utils
 class CTCLoss(tf.keras.losses.Loss):
     def __init__(
         self,
-        blank=0,
-        global_batch_size=None,
+        blank,
+        global_batch_size,
         reduction=losses_utils.ReductionV2.NONE,
         name=None,
     ):
