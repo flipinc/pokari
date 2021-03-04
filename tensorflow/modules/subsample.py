@@ -124,6 +124,67 @@ class VggSubsample(tf.keras.layers.Layer):
             return x
 
 
+class ConvSubsample(tf.keras.layers.Layer):
+    def __init__(
+        self,
+        filters: int,
+        strides: list or tuple or int = 2,
+        kernel_size: int or list or tuple = 3,
+        kernel_regularizer=None,
+        bias_regularizer=None,
+        name="conv_subsample",
+        **kwargs,
+    ):
+        super().__init__(name=name, **kwargs)
+
+        self.conv1 = tf.keras.layers.Conv2D(
+            filters=filters,
+            kernel_size=kernel_size,
+            strides=strides,
+            padding="same",
+            name=f"{name}_1",
+            kernel_regularizer=kernel_regularizer,
+            bias_regularizer=bias_regularizer,
+        )
+
+        self.conv2 = tf.keras.layers.Conv2D(
+            filters=filters,
+            kernel_size=kernel_size,
+            strides=strides,
+            padding="same",
+            name=f"{name}_2",
+            kernel_regularizer=kernel_regularizer,
+            bias_regularizer=bias_regularizer,
+        )
+
+        self.reduction_factor = self.conv1.strides[0] + self.conv2.strides[0]
+
+    def call(self, x, audio_lens, training=False, **kwargs):
+        x = tf.expand_dims(x, axis=-1)
+
+        x = self.conv1(x, training=training)
+        x = tf.nn.relu(x)
+        x = self.conv2(x, training=training)
+        x = tf.nn.relu(x)
+
+        b, t, f, c = shape_list(x)
+        x = tf.reshape(x, [b, t, f * c])
+
+        if audio_lens is not None:
+            audio_lens = tf.cast(
+                tf.math.ceil(
+                    tf.divide(
+                        audio_lens, tf.cast(self.reduction_factor, dtype=tf.int32)
+                    )
+                ),
+                dtype=tf.int32,
+            )
+
+            return x, audio_lens
+        else:
+            return x
+
+
 class StackSubsample(tf.keras.layers.Layer):
     def __init__(self, subsampling_factor: int, name: str = "stack_subsample"):
         super().__init__(name=name)
