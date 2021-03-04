@@ -6,7 +6,8 @@
 
 # this is the only image that I found to work with RTX 3090 and warprnnt
 # without giving `tensorflow.python.framework.errors_impl.NotFoundError undefined symbol: _ZTIN10tensorflow8OpKernelE`
-FROM tensorflow/tensorflow:2.4.1-gpu
+# FROM tensorflow/tensorflow:2.4.1-gpu
+FROM nvcr.io/nvidia/tensorflow:21.02-tf2-py3
 
 RUN apt-get update && \
     apt-get -y install \
