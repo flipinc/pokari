@@ -88,21 +88,3 @@ class CTC(BaseModel):
                     self.text_featurizer.indices2upoints(labels[0]), "UTF-8"
                 ),
             )
-
-            # hypotheses = []
-            # # Drop predictions to CPU
-            # prediction_cpu_tensor = log_probs.long().cpu()
-            # # iterate over batch
-            # for ind in range(prediction_cpu_tensor.shape[self.batch_dim_index]):
-            #     prediction = prediction_cpu_tensor[ind].detach().numpy().tolist()
-            #     # CTC decoding procedure
-            #     decoded_prediction = []
-            #     previous = self.blank_id
-            #     for p in prediction:
-            #         if (
-            #             p != previous or previous == self.blank_id
-            #         ) and p != self.blank_id:
-            #             decoded_prediction.append(p)
-            #         previous = p
-            #     hypothesis = "".join([self.labels_map[c] for c in decoded_prediction])
-            #     hypotheses.append(hypothesis)

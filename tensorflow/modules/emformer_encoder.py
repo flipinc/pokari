@@ -478,7 +478,9 @@ class EmformerEncoder(tf.keras.Model):
         # 3. loop over blocks while saving cache at the same time
         new_cache_k = new_cache_v = []
         for i, block in enumerate(self.blocks):
-            x, (temp_cache_k, temp_cache_v) = block.stream(x, cache[0][i], cache[1][i])
+            x, (temp_cache_k, temp_cache_v) = block.stream(
+                x, cache[0][i], cache[1][i], training=False
+            )
             new_cache_k.append(temp_cache_k)
             new_cache_v.append(temp_cache_v)
 
@@ -604,12 +606,25 @@ class EmformerBlock(tf.keras.layers.Layer):
         mask: tf.Tensor = None,
         training: bool = None,
     ):
+        """
+
+        N: Total_R+Tmax at training time. segment_size at inference time.
+        M: Total_R+Tmax at training time. segment_size + left_size at inference time.
+
+        Args:
+            q: [B, N, H, D]
+            k: [B, M, H, D]
+            v: [B, M, H, D]
+            mask: Only used in training time. [B, 1, Total_R+Tmax, Total_R+Tmax]
+
+        """
         bs = tf.shape(q)[0]
 
-        # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
+        # 1. get attention scores -> [B, H, N, M]
         # TODO: doing the division to either query or key instead of their product
         # saves some computation
-        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
+        scale = tf.math.sqrt(tf.cast(self.d_k, q.dtype))
+        attn_scores = tf.matmul(q, k, transpose_b=True) / scale
 
         # 2. apply mask and softmax
         if mask is not None:
@@ -625,9 +640,9 @@ class EmformerBlock(tf.keras.layers.Layer):
         attn_probs = self.attn_dropout(attn_probs, training=training)
 
         # 3. attend and add residual
-        output = tf.matmul(attn_probs, v)
-        output = tf.transpose(output, [0, 2, 1, 3])
-        output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
+        output = tf.matmul(attn_probs, v)  # [B, H, N, D/H]
+        output = tf.transpose(output, [0, 2, 1, 3])  # [B, N, H, D/H]
+        output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))  # [B, N, D]
         attn_out = output + x
         output = self.ln_out_1(attn_out, training=training)
 
