@@ -11,8 +11,15 @@ class EmformerEncoder(tf.keras.Model):
     """
 
     Some training tips for emformer
+
     - (Only confirmed in PyTorch) to keep positional information, vgg
     subsampling is preferred over stack subsampling
+
+    - Sometimes training fails and transducer only outputs something general and
+    nonsense eg) `the and`, `a the man`. If this happens, the first thing you
+    should do is check for bugs, since outputing general tokens mean predictor is
+    more trained than encoder and the second thing is to tweak optimizer config,
+    especially warmup rate.
 
     """
 
