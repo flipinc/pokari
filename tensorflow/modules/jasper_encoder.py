@@ -1,5 +1,7 @@
 import tensorflow as tf
 
+# TODO: ADD MASK!!!!!!!!!
+
 
 class JasperEncoder(tf.keras.Model):
     def __init__(

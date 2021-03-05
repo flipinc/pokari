@@ -2,16 +2,18 @@ import tensorflow as tf
 from utils.utils import shape_list
 
 from modules.activation import GLU
-from modules.multihead_attention import (MultiHeadAttention,
-                                         RelPositionMultiHeadAttention)
-from modules.positional_encoding import (PositionalEncoding,
-                                         PositionalEncodingConcat)
+from modules.multihead_attention import (
+    MultiHeadAttention,
+    RelPositionMultiHeadAttention,
+)
+from modules.positional_encoding import PositionalEncoding, PositionalEncodingConcat
 from modules.subsample import ConvSubsample, StackSubsample, VggSubsample
 
 L2 = tf.keras.regularizers.l2(1e-6)
 
 
 # TODO: ADD MASK!!!!!!!!!
+
 
 class ConformerEncoder(tf.keras.Model):
     def __init__(
