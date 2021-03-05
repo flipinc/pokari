@@ -79,7 +79,6 @@ optimizer:
 
 encoder:
   _target_: modules.conformer_encoder.ConformerEncoder
-  subsampling: vgg
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor

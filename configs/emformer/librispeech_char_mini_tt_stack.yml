@@ -1,4 +1,5 @@
 # optimizer config based on Transformer Transducer https://arxiv.org/pdf/2002.02562.pdf
+# params: 57,850,014
 
 base_model:
   _target_: models.transducer.Transducer

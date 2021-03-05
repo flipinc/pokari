@@ -20,6 +20,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         bias_constraint: typing.Union[str, typing.Callable] = None,
         **kwargs
     ):
+        """Multi head attention from tfa.layers.MultiHeadAttention"""
         super(MultiHeadAttention, self).__init__(**kwargs)
 
         if output_size is not None and output_size < 1:
@@ -195,6 +196,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
 
 class RelPositionMultiHeadAttention(MultiHeadAttention):
+    """Relative multi head attention from TensorSpeech/TensorFlowASR"""
+
     def build(self, input_shape):
         num_pos_features = input_shape[-1][-1]
         self.pos_kernel = self.add_weight(
