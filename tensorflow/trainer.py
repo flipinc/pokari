@@ -6,8 +6,10 @@ import tensorflow as tf
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/conformer", job_name="emformer")
-    cfgs = compose(config_name="librispeech_char.yml")
+    # initialize(config_path="../configs/emformer_ctc", job_name="emformer")
+    # cfgs = compose(config_name="librispeech_char_mini.yml")
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfgs = compose(config_name="librispeech_char_mini_tt_stack.yml")
 
     if "mxp" in cfgs.trainer:
         # TODO: support mixed precision training. All layers must adapt to

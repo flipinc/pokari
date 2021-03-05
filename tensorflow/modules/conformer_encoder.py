@@ -2,15 +2,16 @@ import tensorflow as tf
 from utils.utils import shape_list
 
 from modules.activation import GLU
-from modules.multihead_attention import (
-    MultiHeadAttention,
-    RelPositionMultiHeadAttention,
-)
-from modules.positional_encoding import PositionalEncoding, PositionalEncodingConcat
+from modules.multihead_attention import (MultiHeadAttention,
+                                         RelPositionMultiHeadAttention)
+from modules.positional_encoding import (PositionalEncoding,
+                                         PositionalEncodingConcat)
 from modules.subsample import ConvSubsample, StackSubsample, VggSubsample
 
 L2 = tf.keras.regularizers.l2(1e-6)
 
+
+# TODO: ADD MASK!!!!!!!!!
 
 class ConformerEncoder(tf.keras.Model):
     def __init__(
@@ -34,7 +35,10 @@ class ConformerEncoder(tf.keras.Model):
         super().__init__(name=name, **kwargs)
 
         if subsampling == "vgg":
-            self.conv_subsampling = VggSubsample()
+            self.conv_subsampling = VggSubsample(
+                subsampling_factor=4,
+                feat_out=144,
+            )
         elif subsampling == "conv":
             self.conv_subsampling = ConvSubsample(
                 filters=144,
@@ -45,9 +49,11 @@ class ConformerEncoder(tf.keras.Model):
                 name=f"{name}_subsampling",
             )
         elif subsampling == "stack":
-            self.conv_subsampling = StackSubsample()
+            self.conv_subsampling = StackSubsample(
+                subsampling_factor=4,
+            )
         else:
-            raise ValueError("subsampling must be either 'conv2d' or 'vgg'")
+            raise ValueError(f"Unsupported subsampling `{subsampling}`")
 
         if positional_encoding == "sinusoid":
             self.pe = PositionalEncoding(name=f"{name}_pe")
@@ -94,8 +100,6 @@ class ConformerEncoder(tf.keras.Model):
 
         for block in self.conformer_blocks:
             x = block([x, pe], training=training, mask=mask, **kwargs)
-
-        tf.print("🐳", x[0], tf.reduce_mean(x), tf.reduce_max(x), tf.reduce_min(x))
 
         return x, audio_lens
 

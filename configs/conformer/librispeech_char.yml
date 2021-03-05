@@ -10,7 +10,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 500
-  model_path: outputs/tensorflow/checkpoints/conformer_01_char.h5
+  # model_path: outputs/tensorflow/checkpoints/conformer_01_char.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/conformer_{epoch:02d}_char.h5
     save_best_only: true
@@ -79,6 +79,7 @@ optimizer:
 
 encoder:
   _target_: modules.conformer_encoder.ConformerEncoder
+  subsampling: vgg
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor

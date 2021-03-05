@@ -1,10 +1,11 @@
+# 成功例
+
 import math
-import typing
 
 import numpy as np
 import tensorflow as tf
 
-# from modules.multihead_attention import MultiHeadAttention
+from modules.multihead_attention import MultiHeadAttention
 from modules.subsample import StackSubsample, VggSubsample
 
 
@@ -66,29 +67,27 @@ class EmformerEncoder(tf.keras.Model):
 
         self.blocks = []
         for i in range(self.num_layers):
-            block = EmformerBlock(
-                num_heads=self.num_heads,
-                dim_model=self.dim_model,
-                dim_ffn=dim_ffn,
-                dropout_attn=dropout_attn,
-                dropout_ffn=dropout_ffn,
-                left_length=self.left_length,
-                chunk_length=self.chunk_length,
-                right_length=self.right_length,
-                name=f"{self.name}_{i}_block",
-            )
-            # mhsa = MHSABlock(
+            # block = EmformerBlock(
             #     num_heads=self.num_heads,
-            #     head_size=self.dim_model // self.num_heads,
+            #     dim_model=self.dim_model,
+            #     dim_ffn=dim_ffn,
+            #     dropout_attn=dropout_attn,
+            #     dropout_ffn=dropout_ffn,
+            #     left_length=self.left_length,
+            #     chunk_length=self.chunk_length,
+            #     right_length=self.right_length,
+            #     name=f"{self.name}_{i}_block",
             # )
+            mhsa = MHSABlock(
+                num_heads=self.num_heads,
+                head_size=self.dim_model // self.num_heads,
+            )
 
-            # ffn = FFNBlock(
-            #     dropout_ffn=dropout_ffn, dim_model=dim_model, dim_ffn=dim_ffn
-            # )
+            ffn = FFNBlock(
+                dropout_ffn=dropout_ffn, dim_model=dim_model, dim_ffn=dim_ffn
+            )
 
-            # self.blocks.append({"mhsa": mhsa, "ffn": ffn})
-
-            self.blocks.append(block)
+            self.blocks.append({"mhsa": mhsa, "ffn": ffn})
 
     def punch_out_ones(
         self,
@@ -589,10 +588,10 @@ class EmformerEncoder(tf.keras.Model):
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
         # using numpy mask instead of tensorflow gives 40%+ training time reduction
         # and this does not affect training at all
-        mask, right_indexes = tf.numpy_function(
-            self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
-        )
-        mask.set_shape([1, None, None])
+        # mask, right_indexes = tf.numpy_function(
+        #     self.np_create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
+        # )
+        mask, right_indexes = self.create_mask(audio_lens, t_new)
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
@@ -601,54 +600,53 @@ class EmformerEncoder(tf.keras.Model):
 
         # 5. loop over blocks.
         for block in self.blocks:
-            x = block(x, mask=mask, training=training)
-            # x = block["mhsa"](x, mask=mask, training=training)
-            # x = block["ffn"](x, training=training)
+            x = block["mhsa"](x, mask=mask, training=training)
+            x = block["ffn"](x, training=training)
 
         x = x[:, len(right_indexes) :, :]
 
         return x, audio_lens
 
 
-# class MHSABlock(tf.keras.layers.Layer):
-#     def __init__(self, **kwargs):
-#         super().__init__()
+class MHSABlock(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__()
 
-#         self.ln_in = tf.keras.layers.LayerNormalization()
-#         self.block = MultiHeadAttention(**kwargs)
+        self.ln_in = tf.keras.layers.LayerNormalization()
+        self.block = MultiHeadAttention(**kwargs)
 
-#     def call(self, x, training=None, mask=None):
-#         output = self.ln_in(x)
-#         output = self.block((output, output, output), mask=mask, training=training)
-#         attn_out = output + x
-#         return attn_out
+    def call(self, x, training=None, mask=None):
+        output = self.ln_in(x)
+        output = self.block((output, output, output), mask=mask, training=training)
+        attn_out = output + x
+        return attn_out
 
 
-# class FFNBlock(tf.keras.layers.Layer):
-#     def __init__(self, dropout_ffn, dim_model, dim_ffn):
-#         super().__init__()
+class FFNBlock(tf.keras.layers.Layer):
+    def __init__(self, dropout_ffn, dim_model, dim_ffn):
+        super().__init__()
 
-#         self.ln_out_1 = tf.keras.layers.LayerNormalization()
-#         self.ln_out_2 = tf.keras.layers.LayerNormalization()
+        self.ln_out_1 = tf.keras.layers.LayerNormalization()
+        self.ln_out_2 = tf.keras.layers.LayerNormalization()
 
-#         self.linear_dropout_1 = tf.keras.layers.Dropout(dropout_ffn)
-#         self.linear_dropout_2 = tf.keras.layers.Dropout(dropout_ffn)
+        self.linear_dropout_1 = tf.keras.layers.Dropout(dropout_ffn)
+        self.linear_dropout_2 = tf.keras.layers.Dropout(dropout_ffn)
 
-#         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
-#         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
+        self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
+        self.linear_out_2 = tf.keras.layers.Dense(dim_model)
 
-#     def call(self, attn_out, training):
-#         output = self.ln_out_1(attn_out, training=training)
+    def call(self, attn_out, training):
+        output = self.ln_out_1(attn_out, training=training)
 
-#         # 4. FFN module in transformer
-#         output = self.linear_out_1(output)
-#         output = self.linear_dropout_1(output, training=training)
-#         output = self.linear_out_2(output)
-#         output = self.linear_dropout_2(output, training=training)
-#         output += attn_out
-#         x = self.ln_out_2(output, training=training)
+        # 4. FFN module in transformer
+        output = self.linear_out_1(output)
+        output = self.linear_dropout_1(output, training=training)
+        output = self.linear_out_2(output)
+        output = self.linear_dropout_2(output, training=training)
+        output += attn_out
+        x = self.ln_out_2(output, training=training)
 
-#         return x
+        return x
 
 
 class EmformerBlock(tf.keras.layers.Layer):
@@ -671,12 +669,6 @@ class EmformerBlock(tf.keras.layers.Layer):
         left_length: int,
         chunk_length: int,
         right_length: int,
-        kernel_initializer: typing.Union[str, typing.Callable] = "glorot_uniform",
-        kernel_regularizer: typing.Union[str, typing.Callable] = None,
-        kernel_constraint: typing.Union[str, typing.Callable] = None,
-        bias_initializer: typing.Union[str, typing.Callable] = "zeros",
-        bias_regularizer: typing.Union[str, typing.Callable] = None,
-        bias_constraint: typing.Union[str, typing.Callable] = None,
         name: str = "emformer_block",
     ):
         super().__init__(name=name)
@@ -692,9 +684,9 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.ln_out_1 = tf.keras.layers.LayerNormalization()
         self.ln_out_2 = tf.keras.layers.LayerNormalization()
 
-        # self.linear_q = tf.keras.layers.Dense(dim_model)
-        # self.linear_k = tf.keras.layers.Dense(dim_model)
-        # self.linear_v = tf.keras.layers.Dense(dim_model)
+        self.linear_q = tf.keras.layers.Dense(dim_model)
+        self.linear_k = tf.keras.layers.Dense(dim_model)
+        self.linear_v = tf.keras.layers.Dense(dim_model)
 
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
@@ -703,49 +695,6 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
-
-        kernel_initializer = tf.keras.initializers.get(kernel_initializer)
-        kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
-        kernel_constraint = tf.keras.constraints.get(kernel_constraint)
-        bias_initializer = tf.keras.initializers.get(bias_initializer)
-        bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
-        bias_constraint = tf.keras.constraints.get(bias_constraint)
-
-        self.query_kernel = self.add_weight(
-            name="query_kernel",
-            shape=[num_heads, dim_model, self.d_k],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.key_kernel = self.add_weight(
-            name="key_kernel",
-            shape=[num_heads, dim_model, self.d_k],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.value_kernel = self.add_weight(
-            name="value_kernel",
-            shape=[num_heads, dim_model, self.d_k],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.projection_kernel = self.add_weight(
-            name="projection_kernel",
-            shape=[num_heads, self.d_k, dim_model],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.projection_bias = self.add_weight(
-            name="projection_bias",
-            shape=[dim_model],
-            initializer=bias_initializer,
-            regularizer=bias_regularizer,
-            constraint=bias_constraint,
-        )
 
     def attend(
         self,
@@ -768,23 +717,19 @@ class EmformerBlock(tf.keras.layers.Layer):
             mask: Only used in training time. [B, 1, Total_R+Tmax, Total_R+Tmax]
 
         """
-        # bs = tf.shape(q)[0]
+        bs = tf.shape(q)[0]
 
         # 1. get attention scores -> [B, H, N, M]
         # TODO: doing the division to either query or key instead of their product
         # saves some computation
-        # scale = tf.sqrt(tf.constant(self.d_k, dtype=q.dtype))
-        # attn_scores = tf.matmul(q, k, transpose_b=True) / scale
-
-        depth = tf.constant(self.d_k, dtype=tf.float32)
-        q /= tf.sqrt(depth)
-
-        attn_scores = tf.einsum("...NHO,...MHO->...HNM", q, k)
+        scale = tf.sqrt(tf.constant(self.d_k, dtype=q.dtype))
+        attn_scores = tf.matmul(q, k, transpose_b=True) / scale
 
         # 2. apply mask and softmax
         if mask is not None:
             # using float(-inf) or -math.inf gives nan after softmax
-            attn_scores += -10e9 * (1.0 - mask)
+            # TODO: for mxp support, use tf.float16.min when dtype == float16 instead
+            attn_scores += -1e9 * (1.0 - mask)
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
             # TODO: does doing this improve accuracy?
             attn_probs = attn_probs * mask
@@ -793,19 +738,14 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         attn_probs = self.attn_dropout(attn_probs, training=training)
 
-        output = tf.einsum("...HNM,...MHI->...NHI", attn_probs, v)
-
-        output = tf.einsum("...NHI,HIO->...NO", output, self.projection_kernel)
-        output += self.projection_bias
-
         # 3. attend and add residual
-        # output = tf.matmul(attn_probs, v)  # [B, H, N, D/H]
-        # output = tf.transpose(output, [0, 2, 1, 3])  # [B, N, H, D/H]
-        # output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))  # [B, N, D]
+        output = tf.matmul(attn_probs, v)  # [B, H, N, D/H]
+        output = tf.transpose(output, [0, 2, 1, 3])  # [B, N, H, D/H]
+        output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))  # [B, N, D]
         attn_out = output + x
+        output = self.ln_out_1(attn_out, training=training)
 
         # 4. FFN module in transformer
-        output = self.ln_out_1(attn_out, training=training)
         output = self.linear_out_1(output)
         output = self.linear_dropout_1(output, training=training)
         output = self.linear_out_2(output)
@@ -889,25 +829,21 @@ class EmformerBlock(tf.keras.layers.Layer):
         Returns:
             tf.Tensor: [B, Total_R+Tmax, D]
         """
-        # bs = tf.shape(inputs)[0]
+        bs = tf.shape(inputs)[0]
 
         # 1. perform layer norm
         x = self.ln_in(inputs)
 
         # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
-        # q = self.linear_q(x)
-        # k = self.linear_k(x)
-        # v = self.linear_v(x)
-        # q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
-        # k = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
-        # v = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
-        # q = tf.transpose(q, [0, 2, 1, 3])
-        # k = tf.transpose(k, [0, 2, 1, 3])
-        # v = tf.transpose(v, [0, 2, 1, 3])
-
-        q = tf.einsum("...NI,HIO->...NHO", x, self.query_kernel)
-        k = tf.einsum("...MI,HIO->...MHO", x, self.key_kernel)
-        v = tf.einsum("...MI,HIO->...MHO", x, self.value_kernel)
+        q = self.linear_q(x)
+        k = self.linear_k(x)
+        v = self.linear_v(x)
+        q = tf.reshape(q, (bs, -1, self.num_heads, self.d_k))
+        k = tf.reshape(k, (bs, -1, self.num_heads, self.d_k))
+        v = tf.reshape(v, (bs, -1, self.num_heads, self.d_k))
+        q = tf.transpose(q, [0, 2, 1, 3])
+        k = tf.transpose(k, [0, 2, 1, 3])
+        v = tf.transpose(v, [0, 2, 1, 3])
 
         x = self.attend(inputs, q, k, v, mask, training)
 
