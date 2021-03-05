@@ -100,7 +100,7 @@ class VggSubsample(tf.keras.layers.Layer):
 
         # 2. causal convolution
         for layer in self.layers:
-            x = tf.pad(x, [[0, 0], [2, 0], [1, 1], [0, 0]])  # kernel_size - 1 = 2
+            x = tf.pad(x, [[0, 0], [2, 0], [1, 1], [0, 0]])  # pad_amt = kernel_size - 1
             x = layer["conv1"](x, training=training)
             x = tf.pad(x, [[0, 0], [2, 0], [1, 1], [0, 0]])
             x = layer["conv2"](x, training=training)

@@ -60,7 +60,7 @@ class TestEmformer:
 
         audio_lens = tf.constant([input_len])
 
-        mask, right_indexes = model.np_create_mask(
+        mask, right_indexes = model.create_mask(
             audio_lens=audio_lens.numpy(), t_max=t_max
         )
 
