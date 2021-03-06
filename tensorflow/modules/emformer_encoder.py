@@ -228,7 +228,8 @@ class EmformerEncoder(tf.keras.Model):
         x = self.subsample(x)
 
         # 3. loop over blocks while saving cache at the same time
-        new_cache_k = new_cache_v = []
+        new_cache_k = []
+        new_cache_v = []
         for i, block in enumerate(self.blocks):
             x, (temp_cache_k, temp_cache_v) = block.stream(x, cache[0][i], cache[1][i])
             new_cache_k.append(temp_cache_k)
@@ -477,8 +478,8 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         Args:
             x (tf.Tensor): [B, S, D]
-            cache_k (tf.Tensor): [N, B, L, H, D/H]
-            cache_v (tf.Tensor): [N, B, L, H, D/H]
+            cache_k (tf.Tensor): [B, L, H, D/H]
+            cache_v (tf.Tensor): [B, L, H, D/H]
         """
         # 1. apply layer norm
         x = self.ln_in(inputs)

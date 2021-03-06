@@ -6,8 +6,8 @@ from models.transducer import Transducer
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/rnnt", job_name="rnnt")
-    cfgs = compose(config_name="librispeech_char.yml")
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfgs = compose(config_name="librispeech_char_large_stack.yml")
 
     transducer = Transducer(cfgs=cfgs, global_batch_size=1)
     transducer._build()

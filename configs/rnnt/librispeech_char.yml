@@ -105,6 +105,6 @@ joint:
   activation: tanh
 
 tflite:
-  frame_length: 1.6 
   model_path_from: outputs/tensorflow/checkpoints/rnnt_01_char_01.h5
   model_path_to: tflites/rnnt_char.tflite
+  frame_length: 1.6 

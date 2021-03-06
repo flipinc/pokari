@@ -1,3 +1,5 @@
+# params: 57,850,014
+
 base_model:
   _target_: models.transducer.Transducer
 
@@ -9,10 +11,10 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 300
-  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_vgg_no_bias.h5
+  log_interval: 250
+  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_stack_temp.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt_temp.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
@@ -65,23 +67,26 @@ text_feature:
   vocabulary: null
   blank_at_zero: true
 
-optimizer:
+optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
   name: adam
   learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
-
-  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_steps: 40000
+    warmup_steps: 4000
     warmup_learning_rate: 1e-6
-    hold_base_ratio: 0.6
+    hold_base_steps: 30000
+
+  variational_noise:
+    mean: 0
+    stddev: 0.01
+    start_step: 10000
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
-  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048

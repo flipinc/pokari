@@ -5,27 +5,27 @@ import soundcard as sc
 from hydra.experimental import compose, initialize
 
 import tensorflow as tf
+from models.transducer import Transducer
 
 # pulseaudio (Linux) does not work on forked proceeses
 # ref: https://github.com/bastibe/SoundCard/issues/96
 
 # TODO: right now, rnnt demo is only supported
 
-multiprocessing = True
+multiprocessing = False
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/rnnt", job_name="rnnt")
-    cfgs = compose(config_name="librispeech_char.yml")
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfgs = compose(config_name="librispeech_char_large_stack.yml")
+    # initialize(config_path="../configs/rnnt", job_name="emformer")
+    # cfgs = compose(config_name="librispeech_char.yml")
+
+    # used for getting initial states
+    transducer = Transducer(cfgs=cfgs, global_batch_size=1, setup_training=False)
 
     sample_rate = cfgs.audio_feature.sample_rate  # 16000
     frame_len = cfgs.tflite.frame_length  # in seconds
     model_path = cfgs.tflite.model_path_to
-
-    num_encoder_layers = cfgs.encoder.num_layers
-    encoder_dim_model = cfgs.encoder.num_units
-
-    num_predictor_layers = cfgs.predictor.num_layers
-    predictor_dim_model = cfgs.predictor.dim_model
 
     chunk_size = int(frame_len * sample_rate)
 
@@ -66,19 +66,8 @@ if __name__ == "__main__":
                 return text, prev_token, encoder_states, predictor_states
 
             prev_token = tf.zeros(shape=[], dtype=tf.int32)
-            encoder_states = tf.zeros(
-                shape=[num_encoder_layers, 2, 1, encoder_dim_model],  # N_e, 2, B=1, D
-                dtype=tf.float32,
-            )
-            predictor_states = tf.zeros(
-                shape=[
-                    num_predictor_layers,
-                    2,
-                    1,
-                    predictor_dim_model,
-                ],  # N_p, 2, B=1, D
-                dtype=tf.float32,
-            )
+            encoder_states = transducer.encoder.get_initial_state(batch_size=1)
+            predictor_states = transducer.predictor.get_initial_state(batch_size=1)
             transcript = ""
 
             while True:
@@ -119,14 +108,8 @@ if __name__ == "__main__":
         model.allocate_tensors()
 
         prev_token = tf.zeros(shape=[], dtype=tf.int32)
-        encoder_states = tf.zeros(
-            shape=[num_encoder_layers, 2, 1, encoder_dim_model],  # N_e, 2, B=1, D
-            dtype=tf.float32,
-        )
-        predictor_states = tf.zeros(
-            shape=[num_predictor_layers, 2, 1, predictor_dim_model],  # N_p, 2, B=1, D
-            dtype=tf.float32,
-        )
+        encoder_states = transducer.encoder.get_initial_state(batch_size=1)
+        predictor_states = transducer.predictor.get_initial_state(batch_size=1)
         transcript = ""
 
         def recognize(signal, prev_token, encoder_states, predictor_states):

@@ -14,9 +14,10 @@ docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Do
 docker build -t transducer/tensorflow -f docker/Dockerfile .
 docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=1g --ulimit memlock=-1 transducer/tensorflow
 ```
-Following installations are required after Docker run:
-- tensorflow==2.3.2 (for tflite conversion only)
-- tensorflow-io==0.16 (for tflite conversion only)
+Following (un)installations are required after Docker run for tflite conversion:
+- uninstall warprnnt_tensorflow
+- install tensorflow==2.3.2
+- install tensorflow-io==0.16
 
 ### TFLite Conversion
 - As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
@@ -27,7 +28,7 @@ it is highly likely that reverting back tensorflow version might solve some issu
 - Make sure the converter version matches with the runtime version to align operation versions
 
 ### Limitations on Tensorflow Version
-- Since warp_rnnt (optimized for CUDA for faster loss calculation) is not used, training time is much slower than PyTorch. It is desirable to use ![this library](https://github.com/HawkAaron/warp-transducer), but its required tensorflow version conflicts with RTX3090 which I am using for training.
+- CTC training is much slower compared to Transducer trianing which uses warprnnt-tensorflow for loss computation
 - Mixed precision training is not supported yet
 
 ### Advice
