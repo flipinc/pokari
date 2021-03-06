@@ -81,7 +81,7 @@ class VggSubsample(tf.keras.layers.Layer):
     def calc_length(self, audio_lens: tf.int32):
         return tf.cast(tf.math.ceil(audio_lens / self.pool_strides), tf.int32)
 
-    def call(self, x: tf.Tensor, audio_lens: tf.int32, training=False, **kwargs):
+    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None, training=False, **kwargs):
         """
 
         Args:
@@ -159,7 +159,7 @@ class ConvSubsample(tf.keras.layers.Layer):
 
         self.reduction_factor = self.conv1.strides[0] + self.conv2.strides[0]
 
-    def call(self, x, audio_lens, training=False, **kwargs):
+    def call(self, x: tf.Tensor, audio_lens: tf.int32 = None, training=False, **kwargs):
         x = tf.expand_dims(x, axis=-1)
 
         x = self.conv1(x, training=training)
