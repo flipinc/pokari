@@ -75,7 +75,7 @@ optimizer:
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    min_lr: 0.0000025
+    min_lr: 0.0000025 # 2e-6
     warmup_steps: 10000
     warmup_learning_rate: 1e-6
     hold_base_steps: 30000
@@ -114,5 +114,6 @@ joint:
   activation: tanh
 
 tflite:
+  batch_size: 2
   model_path_from: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt_vgg.h5
   model_path_to: tflites/emformer_char_mini_vgg.tflite

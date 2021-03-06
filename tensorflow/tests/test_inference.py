@@ -21,24 +21,45 @@ text_featurizer = MockTextFeaturizer()
 predictor = instantiate(cfgs.predictor, num_classes=29)
 joint = instantiate(cfgs.joint, num_classes=29)
 inference = Inference(
-    text_featurizer=text_featurizer, predictor=predictor, joint=joint, max_symbols=1
+    batch_size=3, text_featurizer=text_featurizer, predictor=predictor, joint=joint
 )
 
 
 class TestInference:
+    def test_batch_once(self):
+        """test if two batch decode outputs the same result"""
+
+        encoded_outs = tf.random.normal((3, 240, 512))  # [B, T, D]
+        encoded_lens = tf.constant([220, 240, 230])
+
+        pred_1, _, _ = inference.greedy_batch_decode(
+            encoded_outs=encoded_outs, encoded_lens=encoded_lens, max_symbols=1
+        )
+        pred_2, _, _ = inference.greedy_batch_decode_once(
+            encoded_outs=encoded_outs, encoded_lens=encoded_lens
+        )
+
+        assert tf.reduce_sum(pred_1[0]) == tf.reduce_sum(pred_2[0])
+        assert tf.reduce_sum(pred_1[1]) == tf.reduce_sum(pred_2[1])
+        assert tf.reduce_sum(pred_1[2]) == tf.reduce_sum(pred_2[2])
+
     def test_batch_decode(self):
         """test if two batch decoders return the same result"""
 
         encoded_outs = tf.random.normal((3, 240, 512))  # [B, T, D]
         encoded_lens = tf.constant([220, 240, 230])
 
-        result_1, _, _ = inference.greedy_batch_decode(
+        pred_1, _, _ = inference.greedy_batch_decode(
             encoded_outs=encoded_outs, encoded_lens=encoded_lens
         )
-        result_2 = inference.greedy_naive_batch_decode(
-            encoded_outs=encoded_outs, encoded_lens=encoded_lens
-        )
+        result_1 = text_featurizer.iextract(pred_1)
 
+        pred_2 = inference.greedy_naive_batch_decode(
+            encoded_outs=encoded_outs, encoded_lens=encoded_lens
+        )
+        result_2 = text_featurizer.iextract(pred_2)
+
+        # have to use reduce_sum because both handle blank symbol in a different way
         assert tf.reduce_sum(result_1[0]) == tf.reduce_sum(result_2[0])
         assert tf.reduce_sum(result_1[1]) == tf.reduce_sum(result_2[1])
         assert tf.reduce_sum(result_1[2]) == tf.reduce_sum(result_2[2])

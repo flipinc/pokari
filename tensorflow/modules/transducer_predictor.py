@@ -117,14 +117,14 @@ class TransducerPredictor(tf.keras.Model):
         """Stream function for prediction network
 
         Args:
-            x (tf.Tensor): shape [1, 1]
+            x (tf.Tensor): shape [B, 1]
             states (tf.Tensor): shape [num_lstms, 2, B, P]
 
         Returns:
-            tf.Tensor: outputs with shape [1, 1, P]
-            tf.Tensor: new states with shape [num_lstms, 2, 1, P]
+            tf.Tensor: outputs with shape [B, 1, P]
+            tf.Tensor: new states with shape [num_lstms, 2, B, P]
         """
-        x = self.embed(x, training=False)
+        x = self.embed(x, training=False)  # [B, 1, D_emb]
 
         new_states = []
         for idx, rnn in enumerate(self.rnns):

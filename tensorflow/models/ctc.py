@@ -79,12 +79,11 @@ class CTC(BaseModel):
                 previous = char_idx
 
             hypothesis = tf.expand_dims(hypothesis.stack(), axis=0)  # add batch dim
-            prediction = self.text_featurizer.iextract(hypothesis)
+            preds = self.text_featurizer.iextract(hypothesis)
+            labels = self.text_featurizer.iextract(labels)
 
-            tf.print("❓ PRED: \n", prediction[0])
-            tf.print(
-                "🧩 TRUE: \n",
-                tf.strings.unicode_encode(
-                    self.text_featurizer.indices2upoints(labels[0]), "UTF-8"
-                ),
-            )
+            tf.print("❓ PRED: \n", preds[0])
+            tf.print("🧩 TRUE: \n", labels[0])
+
+            tf.print("📕 WER: \n", self.wer(preds, labels))
+            tf.print("📘 CER: \n", self.cer(preds, labels))

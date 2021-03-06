@@ -15,15 +15,18 @@ docker build -t transducer/tensorflow -f docker/Dockerfile .
 docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=1g --ulimit memlock=-1 transducer/tensorflow
 ```
 Following (un)installations are required after Docker run for tflite conversion:
-- uninstall warprnnt_tensorflow
-- install tensorflow==2.3.2
-- install tensorflow-io==0.16
+```shell
+pip uninstall warprnnt_tensorflow
+pip install tensorflow==2.3.2 tensorflow-io==0.16
+```
 
 ### Run Demo on Tensorflow
 Two streaming options are provided: 1) Live demo and 2) Mock streaming using a sample audio file.
 1) Live demo
-Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI). Install ![SoundCard](https://github.com/bastibe/SoundCard) by running `pip install SoundCard`. Multiprocessing (audio capture & tflite inference) is only supported on Windows. For linux, change to `multiprocessing=False`.
+Since live demo uses OS audio API, first, make sure you are not running on docker container. Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI). Multiprocessing (audio capture & tflite inference) is only supported on Windows. For linux, change to `multiprocessing=False`.
 ```shell
+pip install SoundCard
+pip install --extra-index-url https://google-coral.github.io/py-repo/ tflite_runtime
 python3 tensorflow/transducer_stream_demo.py
 ```
 2) Mock streaming using a sample audio file

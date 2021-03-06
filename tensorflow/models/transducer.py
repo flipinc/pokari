@@ -47,6 +47,7 @@ class Transducer(BaseModel):
         self.summarize_lists = [self.encoder, self.predictor, self.joint]
 
         self.inference = Inference(
+            batch_size=global_batch_size,
             text_featurizer=self.text_featurizer,
             predictor=self.predictor,
             joint=self.joint,
@@ -107,21 +108,15 @@ class Transducer(BaseModel):
         if self.log_interval is not None and tf.equal(
             tf.math.floormod(self.step_counter + 1, self.log_interval), 0
         ):
-            results, _, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
+            preds, _, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
+            preds = self.text_featurizer.iextract(preds)
+            labels = self.text_featurizer.iextract(labels)
 
-            tf.print("❓ PRED: \n", results[0])
-            tf.print(
-                "🧩 TRUE: \n",
-                tf.strings.unicode_encode(
-                    self.text_featurizer.indices2upoints(labels[0]), "UTF-8"
-                ),
-            )
+            tf.print("❓ PRED: \n", preds[0])
+            tf.print("🧩 TRUE: \n", labels[0])
 
-            # wer = self.wer(results, tf.strings.unicode_encode(labels, "UTF-8"))
-            cer = self.cer(results, tf.strings.unicode_encode(labels, "UTF-8"))
-
-            # tf.print("📕 WER: ", wer)
-            tf.print("📘 CER: ", cer)
+            tf.print("📕 WER: \n", self.wer(preds, labels))
+            tf.print("📘 CER: \n", self.cer(preds, labels))
 
     def stream(
         self,
@@ -161,35 +156,10 @@ class Transducer(BaseModel):
 
         tf.print("💎: ", transcript)
 
-    def stream_batch_tflite(
-        self, audio_signals, prev_tokens, cache_encoder_states, cache_predictor_states
-    ):
-        audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
-        audio_features = self.audio_featurizer.stream(audio_signals, audio_lens)
-
-        encoded_outs, cache_encoder_states = self.encoder.stream(
-            audio_features, cache_encoder_states
-        )
-
-        (
-            predictions,
-            prev_tokens,
-            cache_predictor_states,
-        ) = self.inference.greedy_batch_decode(
-            encoded_outs=encoded_outs,
-            encoded_lens=tf.shape(encoded_outs)[1],
-            prev_tokens=prev_tokens,
-            cache_states=cache_predictor_states,
-        )
-
-        transcripts = self.text_featurizer.indices2upoints(predictions)
-
-        return transcripts, prev_tokens, cache_encoder_states, cache_predictor_states
-
     def stream_one_tflite(
         self, audio_signal, prev_token, cache_encoder_states, cache_predictor_states
     ):
-        """Streaming tflite model for batch size = 1
+        """Streaming tflite transducer model for batch size = 1
         Args:
             audio_signal: [T]
             prev_token: []
@@ -217,15 +187,71 @@ class Transducer(BaseModel):
             cache_states=cache_predictor_states,
         )
 
-        # TODO: Right now, if no audio is given, it outputs empty `transcript`. This
-        # will cause an error because tflite expects `transcript` to have a shape.
-        # If you see `ValueError: Invalid tensor size.`, thats the error message.
         transcript = self.text_featurizer.indices2upoints(hypothesis.prediction)
+
+        # if prediction is all blanks, it will cause an error because tflite expects
+        # `transcript` to have a shape. If you see `ValueError: Invalid tensor size.`,
+        # thats the error message. To prevent it, a fake symbol (or this could be used
+        # as end-of-speech symbol) must be added.
+        blank = tf.constant([0], tf.int32)
+        transcript = tf.concat([blank, transcript], axis=0)
 
         return transcript, hypothesis.index, cache_encoder_states, hypothesis.states
 
-    def make_batch_tflite_function(self):
-        pass
+    def stream_batch_tflite(
+        self,
+        audio_signals,
+        prev_tokens,
+        cache_encoder_states,
+        cache_predictor_states,
+    ):
+        """Streaming tflite transducer model for batch size = n
+        Args:
+            audio_signal: [B, T]
+            prev_token: [B, 1]
+            cache_encoder_states: size depends on encoder type
+            cache_predictor_states: [N, 2, B, D_p]
+        Returns:
+            tf.Tensor: transcript with size [B, None]
+            tf.Tensor: last predicted token with size [B, 1]
+            tf.Tensor: new encoder states. size depends on encoder type
+            tf.Tensor: new predictor states with size [N, 2, B, D_p]
+        """
+        audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
+        audio_features = self.audio_featurizer.stream(audio_signals, audio_lens)
+
+        encoded_outs, cache_encoder_states = self.encoder.stream(
+            audio_features, cache_encoder_states
+        )
+
+        (
+            predictions,
+            prev_tokens,
+            cache_predictor_states,
+        ) = self.inference.greedy_batch_decode_once(
+            encoded_outs=encoded_outs,  # [B, T, D_e]
+            encoded_lens=tf.repeat(  # [B]
+                tf.shape(encoded_outs)[1], [tf.shape(encoded_outs)[0]]
+            ),
+            prev_tokens=prev_tokens,  # [B]
+            cache_states=cache_predictor_states,  # size depends on encoder type
+        )
+
+        transcripts = tf.TensorArray(
+            tf.int32,
+            size=tf.shape(predictions)[0],  # bs
+            element_shape=tf.TensorShape([None]),  # max_length
+        )
+        ct = tf.constant(0, tf.int32)
+        max_length = tf.shape(predictions)[1]
+        for pred in predictions:
+            transcript = self.text_featurizer.indices2upoints(pred)  # [None]
+            transcript = tf.pad(transcript, [[0, max_length - tf.shape(transcript)[0]]])
+            transcripts = transcripts.write(ct, transcript)
+            ct += 1
+        transcripts = transcripts.stack()
+
+        return transcripts, prev_tokens, cache_encoder_states, cache_predictor_states
 
     def make_one_tflite_function(self):
         return tf.function(
@@ -239,6 +265,23 @@ class Transducer(BaseModel):
                 ),
                 tf.TensorSpec(
                     self.predictor.get_initial_state(batch_size=1).get_shape(),
+                    dtype=tf.float32,
+                ),
+            ],
+        )
+
+    def make_batch_tflite_function(self, batch_size: int):
+        return tf.function(
+            self.stream_batch_tflite,
+            input_signature=[
+                tf.TensorSpec([batch_size, None], dtype=tf.float32),
+                tf.TensorSpec([batch_size, 1], dtype=tf.int32),
+                tf.TensorSpec(
+                    self.encoder.get_initial_state(batch_size=batch_size).get_shape(),
+                    dtype=tf.float32,
+                ),
+                tf.TensorSpec(
+                    self.predictor.get_initial_state(batch_size=batch_size).get_shape(),
                     dtype=tf.float32,
                 ),
             ],

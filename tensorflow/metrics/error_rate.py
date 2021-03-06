@@ -80,9 +80,7 @@ class ErrorRate:
         if kind == "cer":
             self.func = cer
         elif kind == "wer":
-            raise ValueError(
-                "Tensorflow version of `wer` is not ready. It can be used though."
-            )
+            self.func = wer
         else:
             raise ValueError("Available options are `cer` and `wer`.")
 
