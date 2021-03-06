@@ -11,7 +11,7 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 500
+  log_interval: 10
   # model_path: outputs/tensorflow/checkpoints/rnnt_01_char.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char.h5
@@ -20,7 +20,7 @@ trainer:
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/rnnt/
+    log_dir: outputs/tensorflow/logs/rnnt_librispeech_char/
     histogram_freq: 1
     write_graph: true
     write_images: true
@@ -71,7 +71,7 @@ optimizer:
   learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
- 
+
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_steps: 40000

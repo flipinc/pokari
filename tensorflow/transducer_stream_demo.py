@@ -3,9 +3,9 @@ from multiprocessing import Manager, Process
 
 import numpy as np
 import soundcard as sc
+import tflite_runtime.interpreter as tflite
 from hydra.experimental import compose, initialize
 
-import tensorflow as tf
 from models.transducer import Transducer
 from modules.emformer_encoder import EmformerEncoder
 from modules.rnnt_encoder import RNNTEncoder
@@ -99,7 +99,7 @@ if __name__ == "__main__":
         q = m.Queue()
 
         def recognizer(q):
-            model = tf.lite.Interpreter(model_path=model_path)
+            model = tflite.Interpreter(model_path=model_path)
 
             input_details = model.get_input_details()
             output_details = model.get_output_details()
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
             def recognize(signal, prev_token, encoder_states, predictor_states):
                 if signal.shape[0] < segment_size:
-                    signal = tf.pad(signal, [[0, segment_size - signal.shape[0]]])
+                    signal = np.pad(signal, (0, segment_size - signal.shape[0]))
 
                 model.set_tensor(input_details[0]["index"], signal)
                 model.set_tensor(input_details[1]["index"], prev_token)
@@ -127,9 +127,11 @@ if __name__ == "__main__":
 
                 return text, prev_token, encoder_states, predictor_states
 
-            prev_token = tf.zeros(shape=[], dtype=tf.int32)
-            encoder_states = transducer.encoder.get_initial_state(batch_size=1)
-            predictor_states = transducer.predictor.get_initial_state(batch_size=1)
+            prev_token = np.zeros(shape=[], dtype=np.int32)
+            encoder_states = transducer.encoder.get_initial_state(batch_size=1).numpy()
+            predictor_states = transducer.predictor.get_initial_state(
+                batch_size=1
+            ).numpy()
             transcript = ""
 
             while True:
@@ -158,7 +160,7 @@ if __name__ == "__main__":
 
         tflite_process.terminate()
     else:
-        model = tf.lite.Interpreter(model_path=model_path)
+        model = tflite.Interpreter(model_path=model_path)
 
         input_details = model.get_input_details()
         output_details = model.get_output_details()
@@ -166,14 +168,14 @@ if __name__ == "__main__":
         model.resize_tensor_input(input_details[0]["index"], [segment_size])
         model.allocate_tensors()
 
-        prev_token = tf.zeros(shape=[], dtype=tf.int32)
-        encoder_states = transducer.encoder.get_initial_state(batch_size=1)
-        predictor_states = transducer.predictor.get_initial_state(batch_size=1)
+        prev_token = np.zeros(shape=[], dtype=np.int32)
+        encoder_states = transducer.encoder.get_initial_state(batch_size=1).numpy()
+        predictor_states = transducer.predictor.get_initial_state(batch_size=1).numpy()
         transcript = ""
 
         def recognize(signal, prev_token, encoder_states, predictor_states):
             if signal.shape[0] < segment_size:
-                signal = tf.pad(signal, [[0, segment_size - signal.shape[0]]])
+                signal = np.pad(signal, (0, segment_size - signal.shape[0]))
 
             model.set_tensor(input_details[0]["index"], signal)
             model.set_tensor(input_details[1]["index"], prev_token)

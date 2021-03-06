@@ -22,7 +22,6 @@ def transducer_setup(cfgs):
         text_featurizer=text_featurizer,
         predictor=predictor,
         joint=joint,
-        max_symbols=1,
     )
 
     stream = MockStream(

@@ -33,7 +33,7 @@ class BaseModel(tf.keras.Model):
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
         # it is better to just disable all training logics when they are unused
         if setup_training:
-            # self.wer = ErrorRate(kind="wer")
+            self.wer = ErrorRate(kind="wer")
             self.cer = ErrorRate(kind="cer")
 
             self.debugging = (
@@ -257,9 +257,6 @@ class BaseModel(tf.keras.Model):
         # ref: https://arxiv.org/pdf/2005.03271v1.pdf
         if self.variational_noise_cfg is not None:
             start_step = self.variational_noise_cfg["start_step"]
-
-            if tf.equal(start_step, -1):
-                start_step = self.warmup_steps
 
             if tf.less_equal(start_step, self.step_counter):
                 new_gradients = []

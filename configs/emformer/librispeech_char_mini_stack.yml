@@ -75,7 +75,7 @@ optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    min_lr: 0.0000025
+    min_lr: 0.0000025 # 2e-6
     warmup_steps: 4000
     warmup_learning_rate: 1e-6
     hold_base_steps: 30000

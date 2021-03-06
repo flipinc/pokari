@@ -8,12 +8,23 @@ tf.keras.backend.clear_session()
 
 
 def convert_to_tflite(cfgs: DictConfig):
-    transducer = Transducer(cfgs=cfgs, global_batch_size=1, setup_training=False)
+    if "batch_size" in cfgs.tflite:
+        batch_size = cfgs.tflite.batch_size
+    else:
+        batch_size = 1
+
+    transducer = Transducer(
+        cfgs=cfgs, global_batch_size=batch_size, setup_training=False
+    )
     transducer._build()
 
     transducer.load_weights(cfgs.tflite.model_path_from)
 
-    tf_func = transducer.make_one_tflite_function()
+    if batch_size > 1:
+        tf_func = transducer.make_batch_tflite_function(cfgs.tflite.batch_size)
+    else:
+        tf_func = transducer.make_one_tflite_function()
+
     concrete_func = tf_func.get_concrete_function()
 
     converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
