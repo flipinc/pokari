@@ -19,6 +19,19 @@ Following (un)installations are required after Docker run for tflite conversion:
 - install tensorflow==2.3.2
 - install tensorflow-io==0.16
 
+### Run Demo on Tensorflow
+Two streaming options are provided: 1) Live demo and 2) Mock streaming using a sample audio file.
+1) Live demo
+Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI). Install ![SoundCard](https://github.com/bastibe/SoundCard) by running `pip install SoundCard`. Multiprocessing (audio capture & tflite inference) is only supported on Windows. For linux, change to `multiprocessing=False`.
+```shell
+python3 tensorflow/transducer_stream_demo.py
+```
+2) Mock streaming using a sample audio file
+As of now, only loading from one of training examples are supported. Will support loading arbitrary file(s) given as args in the future.
+```shell
+python3 tensorflow/transducer_stream_file.py
+```
+
 ### TFLite Conversion
 - As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
 `tensorflow.python.framework.errors_impl.InvalidArgumentError: Attempting to add a duplicate function with name`,
@@ -35,8 +48,4 @@ it is highly likely that reverting back tensorflow version might solve some issu
 - To keep tabs on which commit generated which result, when a training is finished, post a screen-shot of training loss curve, its commit number, and a configuration file used for it.
 
 ### Design
-- Pytorch is very easy to develop a DL model. However, when it comes to deployment, especially around onnx support, it is much easier to use Tensorflow. Transducer model is quite complex because of its stateful structure, and I have not yet seen any successfully exported PyTorch models. For reference, CTC can be exported and ![NeMo](https://github.com/NVIDIA/NeMo/blob/25abffdd37efb3a9f5a6e236d910f045271ae08f/nemo/collections/asr/models/ctc_models.py) provides an interface for it.
-
-### Run locally
-- Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI).
-- To run TFLite models locally, install ![SoundCard](https://github.com/bastibe/SoundCard) by running `pip install soundcard`.
+- Pytorch is the best for developing a DL model. However, when it comes to deployment, it is much easier to use Tensorflow. Transducer models are quite complex because of its stateful structure, and I have not yet seen any successfully exported PyTorch models. Therefore, Tensorflow is used as a default developing framework.

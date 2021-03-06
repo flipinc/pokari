@@ -40,6 +40,9 @@ RUN git clone https://github.com/Thumb-Technologies/warp-transducer.git && \
 # install pokari dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+# install tflite_runtime
+# ref: https://www.tensorflow.org/lite/guide/python
+RUN pip install --extra-index-url https://google-coral.github.io/py-repo/ tflite_runtime
 
 WORKDIR /workspace/pokari
 COPY . .

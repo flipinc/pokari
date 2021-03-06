@@ -17,6 +17,9 @@ class TransducerPredictor(tf.keras.Model):
     ):
         """
 
+        Note: TFLite does not support stateful LSTM as of 2021/3/6
+        https://www.tensorflow.org/lite/convert/rnn
+
         Args:
             random_state_sampling: RSS proves to improve model accuracy when seen
             out of domain data (https://arxiv.org/pdf/2005.03271v1.pdf)

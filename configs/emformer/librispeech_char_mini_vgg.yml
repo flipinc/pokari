@@ -1,24 +1,26 @@
+# params: 59,010,526
+
 base_model:
   _target_: models.transducer.Transducer
 
 trainer:
   devices: [0]
-  run_eagerly: true
+  run_eagerly: false
   batch_size: 4
   epochs: 100
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 100
-  # model_path: outputs/tensorflow/checkpoints/emformer_02_char_mini_vgg_new.h5
+  log_interval: 500
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt_vgg.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg_vgg.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt_vgg.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/emformer/
+    log_dir: outputs/tensorflow/logs/emformer_librispeech_char_mini_vgg/
     histogram_freq: 1
     write_graph: true
     write_images: true
@@ -70,18 +72,21 @@ optimizer:
   learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
-
-  gradient_clip_val: 1
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_steps: 40000
+    warmup_steps: 10000
     warmup_learning_rate: 1e-6
-    hold_base_steps: 0.6
+    hold_base_steps: 30000
+
+  variational_noise:
+    mean: 0
+    stddev: 0.01
+    start_step: 20000
 
 encoder:
   _target_: modules.emformer_encoder.EmformerEncoder
-  num_layers: 16 # 26 for medium latency, 18 for low latency in paper
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
   num_heads: 8
   dim_model: 512
   dim_ffn: 2048
