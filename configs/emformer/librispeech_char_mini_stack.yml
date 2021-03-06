@@ -12,7 +12,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 250
-  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_tt_temp.h5
     save_best_only: true
@@ -75,6 +75,7 @@ optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
+    min_lr: 0.0000025
     warmup_steps: 4000
     warmup_learning_rate: 1e-6
     hold_base_steps: 30000

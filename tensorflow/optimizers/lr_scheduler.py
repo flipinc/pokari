@@ -7,6 +7,7 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         self,
         learning_rate,
         total_steps,
+        min_lr=0.0,
         warmup_learning_rate=0.0,
         warmup_steps=0,
         warmup_ratio=None,
@@ -17,6 +18,7 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         Args:
             learning_rate: base learning rate.
             total_steps: total number of training steps.
+            min_lr: minimum learning rate applied after warmup steps
             warmup_learning_rate: initial learning rate for warm up.
             warmup_steps: number of warmup steps.
             hold_base_steps: Optional number of steps to hold base learning rate
@@ -37,8 +39,10 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
         if hold_base_steps > total_steps:
             raise ValueError("Hold base steps must be less than the total steps.")
 
-        self.learning_rate_base = learning_rate
         self.total_steps = total_steps
+        self.min_lr = min_lr
+        self.learning_rate_base = learning_rate
+
         self.warmup_learning_rate = warmup_learning_rate
         self.warmup_steps = (
             int(total_steps * warmup_ratio)
@@ -94,6 +98,17 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
             learning_rate = tf.where(
                 global_step < self.warmup_steps, warmup_rate, learning_rate
             )
+
+        learning_rate = tf.where(
+            # this is a little hack because tf.where does not accept multiple conditions
+            tf.cast(
+                tf.cast(global_step > self.warmup_steps, tf.int8)
+                * tf.cast(learning_rate < self.min_lr, tf.int8),
+                tf.bool,
+            ),
+            self.min_lr,
+            learning_rate,
+        )
 
         self.value = tf.where(global_step > self.total_steps, 0.0, learning_rate)
 
