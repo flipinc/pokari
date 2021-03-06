@@ -74,7 +74,7 @@ optimizer:
  
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    warmup_ratio: 40000
+    warmup_steps: 40000
     warmup_learning_rate: 1e-6
     hold_base_ratio: 0.6
 
