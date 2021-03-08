@@ -290,8 +290,18 @@ class WordpieceFeaturizer(TextFeaturizer):
     def iextract(self, indices: tf.Tensor) -> tf.Tensor:
         with tf.device("/CPU:0"):  # string data is not supported on GPU
             indices = self.normalize_indices(indices)
+            # returns ragged tensor with one element corresponds to one word
+            # eg) ["i'm", "<pad>", "thirsty", "<pad>", ...]
             text = self.subwords.detokenize(indices)
-            return tf.strings.reduce_join(text, separator=" ", axis=-1)
+            # ["i'm", "", "thirsty", ""]
+            text = tf.strings.regex_replace(text, "<pad>", "")
+            # ["i'm  thirsty "] <- double spaces & trailing space
+            text = tf.strings.reduce_join(text, separator=" ", axis=-1)
+            # ["i'm thirsty "] <- trailing space
+            text = tf.strings.regex_replace(text, " +", " ")
+            # ["i'm thirsty"]
+            text = tf.strings.strip(text)
+            return text
 
     @tf.function(input_signature=[tf.TensorSpec([None], dtype=tf.int32)])
     def indices2upoints(self, indices: tf.Tensor) -> tf.Tensor:
