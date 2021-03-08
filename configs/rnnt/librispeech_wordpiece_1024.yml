@@ -9,16 +9,16 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 100
+  log_interval: 500
   # model_path: outputs/tensorflow/checkpoints/rnnt_01_char.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char_00.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_wordpiece_1024.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/rnnt/
+    log_dir: outputs/tensorflow/logs/rnnt_wordpiece_1024/
     histogram_freq: 1
     write_graph: true
     write_images: true
@@ -61,11 +61,10 @@ audio_feature:
   pad_to: 16
 
 text_feature:
-_target_: frontends.text_featurizer.SubwordFeaturizer
-  vocabulary: null
+  _target_: frontends.text_featurizer.WordpieceFeaturizer
   target_vocab_size: 1024
   max_token_length: 4
-  subwords: /workspace/datasets/4096_20.subwords
+  subwords_path: /workspace/datasets/1024_4.wordpiece
   subwords_corpus:
     - /workspace/datasets/tensorflow_asr_360.tsv
 

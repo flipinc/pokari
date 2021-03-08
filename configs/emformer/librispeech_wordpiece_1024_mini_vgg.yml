@@ -12,13 +12,13 @@ trainer:
   log_interval: 500
   # model_path: outputs/tensorflow/checkpoints/emformer_01_subword_1.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_subword.h5
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_wordpiece_1024.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/emformer_librispeech_subword_1024_mini_vgg/
+    log_dir: outputs/tensorflow/logs/emformer_librispeech_wordpiece_1024_mini_vgg/
     histogram_freq: 1
     write_graph: true
     write_images: true
