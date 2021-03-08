@@ -19,6 +19,7 @@ def transducer_setup(cfgs):
     joint = instantiate(cfgs.joint, num_classes=29)
 
     inference = Inference(
+        batch_size=1,
         text_featurizer=text_featurizer,
         predictor=predictor,
         joint=joint,

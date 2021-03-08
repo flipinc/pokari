@@ -20,6 +20,14 @@ pip uninstall warprnnt_tensorflow
 pip install tensorflow==2.3.2 tensorflow-io==0.16
 ```
 
+### TFLite Conversion
+- As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
+`tensorflow.python.framework.errors_impl.InvalidArgumentError: Attempting to add a duplicate function with name`,
+it is highly likely that reverting back tensorflow version might solve some issues (or at least give you directions to solve them). It is confirmed that following tensorflow version works.
+    - tensorflow 2.3.2
+- tf.string is not supported in TFLite, so all models outputs Unicode instead.
+- Make sure the converter version matches with the runtime version to align operation versions
+
 ### Run Demo on Tensorflow
 Two streaming options are provided: 1) Live demo and 2) Mock streaming using a sample audio file.
 1) Live demo
@@ -34,14 +42,6 @@ As of now, only loading from one of training examples are supported. Will suppor
 ```shell
 python3 tensorflow/transducer_stream_file.py
 ```
-
-### TFLite Conversion
-- As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
-`tensorflow.python.framework.errors_impl.InvalidArgumentError: Attempting to add a duplicate function with name`,
-it is highly likely that reverting back tensorflow version might solve some issues (or at least give you directions to solve them). It is confirmed that following tensorflow version works.
-    - tensorflow 2.3.2
-- tf.string is not supported in TFLite, so all models outputs Unicode instead.
-- Make sure the converter version matches with the runtime version to align operation versions
 
 ### Limitations on Tensorflow Version
 - CTC training is much slower compared to Transducer trianing which uses warprnnt-tensorflow for loss computation

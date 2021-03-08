@@ -82,6 +82,12 @@ class CTC(BaseModel):
             preds = self.text_featurizer.iextract(hypothesis)
             labels = self.text_featurizer.iextract(labels)
 
+            # some text_featurizer register blank/pad token as <pad>
+            preds = tf.strings.regex_replace(preds, "<pad>", "")
+            preds = tf.strings.strip(preds)
+            labels = tf.strings.regex_replace(labels, "<pad>", "")
+            labels = tf.strings.strip(labels)
+
             tf.print("❓ PRED: \n", preds[0])
             tf.print("🧩 TRUE: \n", labels[0])
 
