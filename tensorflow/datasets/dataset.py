@@ -24,20 +24,24 @@ class Dataset:
         """
 
         Args:
+            stage (str): the name of this dataset. currently not used
+            cache (bool): cache WHOLE transformed dataset to memory
+            shuffle (bool): shuffle tf.data.Dataset
+            buffer_size (int): shuffle buffer size
+            drop_remainder (bool): drop remainder for multi gpu training
 
         """
+        if buffer_size <= 0 and shuffle:
+            raise ValueError("buffer_size must be positive when shuffle is on")
+
         self.audio_featurizer = audio_featurizer
         self.text_featurizer = text_featurizer
         self.data_paths = data_paths
-        self.cache = cache  # whether to cache WHOLE transformed dataset to memory
-        self.shuffle = shuffle  # whether to shuffle tf.data.Dataset
-        if buffer_size <= 0 and shuffle:
-            raise ValueError("buffer_size must be positive when shuffle is on")
-        self.buffer_size = buffer_size  # shuffle buffer size
-        self.stage = stage  # for defining tfrecords files
-        self.drop_remainder = (
-            drop_remainder  # whether to drop remainder for multi gpu training
-        )
+        self.cache = cache
+        self.shuffle = shuffle
+        self.buffer_size = buffer_size
+        self.drop_remainder = drop_remainder
+
         self.steps_per_epoch = None  # for better training visualization
 
         self.num_print_sample_data = num_print_sample_data

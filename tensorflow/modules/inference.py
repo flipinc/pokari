@@ -71,8 +71,6 @@ class Inference:
 
         Note: This cannot be converted to TFLite. Use greedy_batch_decode_once instead.
 
-        TODO: This impl is not completed yet. `labels` include unnecessary symbols.
-
         Args:
             encoded_outs: [B, T, D_e]
             encoded_lens: [B]
@@ -91,7 +89,7 @@ class Inference:
         # after some training iterations (usually very beginning of the
         # first epoch), model starts to predict all blanks. So, a blank has to be
         # inside labels in order to stack(). All blanks will be removed afterwards.
-        # labels = labels.write(0, tf.fill([bs], 0))
+        labels = labels.write(0, tf.fill([bs], 0))
 
         last_label = (
             prev_tokens
@@ -218,11 +216,6 @@ class Inference:
             clear_after_read=True,
             element_shape=tf.TensorShape([self.batch_size]),
         )
-
-        # after some training iterations (usually very beginning of the
-        # first epoch), model starts to predict all blanks. So, a blank has to be
-        # inside labels in order to stack(). All blanks will be removed afterwards.
-        # labels = labels.write(0, tf.fill([bs], 0))
 
         blank_mask = tf.fill([bs], 0)
 

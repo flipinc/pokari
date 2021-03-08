@@ -21,6 +21,9 @@ class EmformerEncoder(tf.keras.Model):
     more trained than encoder and the second thing is to tweak optimizer config,
     especially warmup rate.
 
+    - For subword models, it takes more time than charcter models to predict
+    non-general words.
+
     """
 
     def __init__(
