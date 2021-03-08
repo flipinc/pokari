@@ -17,7 +17,7 @@ docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Do
 Following (un)installations are required after Docker run for tflite conversion:
 ```shell
 pip uninstall warprnnt_tensorflow
-pip install tensorflow==2.3.2 tensorflow-io==0.16
+pip install tensorflow==2.3.2 tensorflow-io==0.16 tensorflow-text==2.3
 ```
 
 ### TFLite Conversion
