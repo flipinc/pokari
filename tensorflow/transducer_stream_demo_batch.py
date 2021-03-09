@@ -57,11 +57,8 @@ if __name__ == "__main__":
         model.resize_tensor_input(input_details[0]["index"], [2, segment_size])
         model.allocate_tensors()
 
-        def recognize(signal, prev_token, encoder_states, predictor_states):
-            if signal.shape[0] < segment_size:
-                signal = np.pad(signal, (0, segment_size - signal.shape[0]))
-
-            model.set_tensor(input_details[0]["index"], signal)
+        def recognize(signals, prev_token, encoder_states, predictor_states):
+            model.set_tensor(input_details[0]["index"], signals)
             model.set_tensor(input_details[1]["index"], prev_token)
             model.set_tensor(input_details[2]["index"], encoder_states)
             model.set_tensor(input_details[3]["index"], predictor_states)
@@ -86,11 +83,21 @@ if __name__ == "__main__":
         while True:
             try:
                 input_audio_signal = q_input.get()
+                if input_audio_signal.shape[0] < segment_size:
+                    input_audio_signal = np.pad(
+                        input_audio_signal,
+                        (0, segment_size - input_audio_signal.shape[0]),
+                    )
             except queue.Empty:
                 input_audio_signal = np.zeros(shape=[segment_size], dtype=np.float32)
 
             try:
                 output_audio_signal = q_output.get()
+                if output_audio_signal.shape[0] < segment_size:
+                    output_audio_signal = np.pad(
+                        output_audio_signal,
+                        (0, segment_size - output_audio_signal.shape[0]),
+                    )
             except queue.Empty:
                 output_audio_signal = np.zeros(shape=[segment_size], dtype=np.float32)
 
