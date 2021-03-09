@@ -12,27 +12,27 @@ jobs:
   publish:
     runs-on: windows-latest
 
-  steps:
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-    - name: Install pyinstaller
-      run: pip install pyinstaller
-    - name: Build
-      run: pyinstaller tensorflow/audio_demo.py --onefile
-    - name: ls
-      run: ls dist/
-    - name: Upload executable
-      uses: svenstaro/upload-release-action@v2
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: dist/audio_demo.exe
-        asset_name: audio demo
-        tag: ${{ github.ref }}
-        overwrite: true
-        body: "hello world"
+    steps:
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install pyinstaller
+        run: pip install pyinstaller
+      - name: Build
+        run: pyinstaller tensorflow/audio_demo.py --onefile
+      - name: ls
+        run: ls dist/
+      - name: Upload executable
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/audio_demo.exe
+          asset_name: audio demo
+          tag: ${{ github.ref }}
+          overwrite: true
+          body: "hello world"
