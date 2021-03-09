@@ -1,0 +1,119 @@
+base_model:
+  _target_: models.transducer.Transducer
+
+trainer:
+  devices: [0]
+  run_eagerly: false
+  batch_size: 4
+  epochs: 100
+  workers: 4
+  max_queue_size: 10
+  use_multiprocessing: false
+  log_interval: 500
+  # model_path: outputs/tensorflow/checkpoints/emformer_01_wordpiece_1024.h5
+  checkpoint:
+    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_wordpiece_1024.h5
+    save_best_only: true
+    save_weights_only: false
+    save_freq: 2000
+    monitor: loss
+  tensorboard:
+    log_dir: outputs/tensorflow/logs/emformer_librispeech_wordpiece_1024_mini_stack/
+    histogram_freq: 1
+    write_graph: true
+    write_images: true
+    update_freq: 50
+    profile_batch: 0
+  debugging: false
+
+spec_augment:
+  freq_masks: 2
+  time_masks: 2
+  freq_width: 15
+  time_width: 25
+
+train_ds:
+  stage: train
+  data_paths:
+    - /workspace/datasets/tensorflow_asr_360.tsv
+  shuffle: true
+  cache: false
+  buffer_size: 100
+  drop_remainder: false
+  num_print_sample_data: 1
+
+validation_ds:
+  stage: val
+  data_paths:
+    - /workspace/datasets/tensorflow_asr_val.tsv
+  shuffle: false
+  cache: true
+  buffer_size: 100
+  drop_remainder: false
+
+audio_feature:
+  sample_rate: 16000
+  window_size: 0.02
+  window_stride: 0.01
+  n_mels: &n_mels 80
+  preemph: 0.97
+  dither: 1e-5
+  pad_to: 16
+
+text_feature:
+  _target_: frontends.text_featurizer.WordpieceFeaturizer
+  target_vocab_size: 1024
+  max_token_length: 4
+  subwords_path: /workspace/datasets/1024_4.wordpiece
+  subwords_corpus:
+    - /workspace/datasets/tensorflow_asr_360.tsv
+
+optimizer:
+  name: adam
+  learning_rate: 0.0005
+  beta_1: 0.9
+  beta_2: 0.999
+ 
+  lr_scheduler:
+    _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
+    min_lr: 0.0000025 # 2e-6
+    warmup_steps: 40000
+    warmup_learning_rate: 1e-6
+    hold_base_steps: 30000
+
+  variational_noise:
+    mean: 0
+    stddev: 0.01
+    start_step: 40000
+
+encoder:
+  _target_: modules.emformer_encoder.EmformerEncoder
+  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
+  num_heads: 8
+  dim_model: 512
+  dim_ffn: 2048
+  dropout_attn: 0.1
+  dropout_ffn: 0.1
+  subsampling: stack # frame stacking in paper
+  subsampling_factor: 4
+  subsampling_dim: 64
+  left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
+  chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
+  right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
+
+predictor:
+  _target_: modules.transducer_predictor.TransducerPredictor
+  num_layers: 1 # 2 in paper
+  embed_dim: 320 # 256 in paper
+  dim_model: 512 # 512 in paper
+  dropout: 0.1
+  random_state_sampling: true
+
+joint:
+  _target_: modules.transducer_joint.TransducerJoint
+  dim_model: 640 # 640 in paper
+  activation: tanh
+
+tflite:
+  model_path_from: outputs/tensorflow/checkpoints/emformer_01_subword.h5
+  model_path_to: tflites/emformer_wordpiece_1024_mini_vgg.tflite
