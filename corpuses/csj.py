@@ -10,7 +10,7 @@ def create_tsv(
     "A03M0106 A05M0011 A01M0056 A03F0072 A02M0012 A03M0016 A06M0064 A06F0135 "
     "A01F0034 A01F0063 A01F0001 A01M0141 S00M0112 S00F0066 S00M0213 S00F0019 "
     "S00M0079 S01F0105 S00F0152 S00M0070 S00M0008 S00F0148",
-    max_duration=30,
+    max_duration=9,  # 17 is the length that can include every lines
 ):
     """Create a transcript tsv file of .sdb files in MORPH directory
 
@@ -77,37 +77,58 @@ def create_tsv(
                         prev_end_offset = None
 
                         def save(end_offset):
-                            writer.writerow(
-                                [
-                                    audio_path,
-                                    "".join(current_words),
-                                    end_offset - current_offset,
-                                    current_offset,
-                                ]
-                            )
+                            if current_offset is not None and end_offset is not None:
+                                writer.writerow(
+                                    [
+                                        audio_path,
+                                        "".join(current_words),
+                                        end_offset - current_offset,
+                                        current_offset,
+                                    ]
+                                )
 
-                        # note that time does not increment monotonically. some words
-                        # are grouped and have the same time offset
+                        # note that time does not increment every step. (however, it
+                        # does increase monotonically). some words are grouped and have
+                        # the same time offset
                         for line in f:
                             line = line.rstrip()
                             line = re.split("\t", line)
+
+                            word = line[5]
+                            if re.search("^<.*>$", word):
+                                save(prev_end_offset)
+                                current_offset = None
+                                prev_end_offset = None
+                                continue
 
                             time = (
                                 line[3].split()[1].split("-")
                             )  # `id <start>-<end> L:_-_`
                             start_offset = float(time[0])
                             end_offset = float(time[1])
+                            if (end_offset - start_offset) > max_duration:
+                                print(
+                                    "Detected a line with length "
+                                    f"{end_offset - start_offset} in {file}. "
+                                    "Skipping."
+                                )
+                                print("transcript: ", line[5])
+                                save(prev_end_offset)
+                                current_offset = None
+                                prev_end_offset = None
+                                continue
+
                             if current_offset is None:
                                 current_offset = start_offset
 
                             if (end_offset - current_offset) > max_duration:
-                                # does not include current word, so use previous end
-                                # offset
+                                # saving previous chunk. does not include current word,
+                                # so use previous end offset
                                 save(prev_end_offset)
                                 current_words = []
                                 current_offset = start_offset
-
-                            word = line[5]
+                                # this doesn't have to be None but for consistency
+                                prev_end_offset = None
 
                             if re.search("A", word) or i != 0:
                                 if (
@@ -204,6 +225,6 @@ def create_vocab(
 
 
 if __name__ == "__main__":
-    # create_tsv()
+    create_tsv()
     # create_vocab()
     print("✨ Done")

@@ -1,5 +1,6 @@
+# TODO: training with this config has not been succeeded
 # Note: ctc_loss is too slow. instead of pretraining for transducer its better to spend more time
-# on the best parameters for transducer model training
+# on the best parameters for transducer model training.
 
 base_model:
   _target_: models.ctc.CTC
@@ -64,7 +65,7 @@ audio_feature:
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
-  vocabulary: null
+  vocab_path: null
   blank_at_zero: true
 
 optimizer:

@@ -21,6 +21,11 @@ class Transducer(BaseModel):
     - For transducer models and CTC modesl, the first phase of learning is to learn all
     blanks.
     - The balance between predictor and encoder is super important.
+    - Memory requirement is so high for transducer models. There are a couple of things
+    you can try to decrease memory capacity
+        1. reduce audio length (for transformer, be careful with the amount of contexts)
+        2. reduce batch size
+        3. reduce vocab size
 
     """
 

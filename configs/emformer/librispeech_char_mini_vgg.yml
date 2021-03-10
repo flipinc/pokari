@@ -12,7 +12,7 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 500
-  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt_vgg.h5
+  model_path: outputs/tensorflow/checkpoints/emformer_01_char_mini_vgg.h5
   checkpoint:
     filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char_mini_vgg.h5
     save_best_only: true
@@ -64,7 +64,7 @@ audio_feature:
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
-  vocabulary: null
+  vocab_path: null
   blank_at_zero: true
 
 optimizer:

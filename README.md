@@ -6,13 +6,13 @@
 ### Start with PyTorch Docker
 ```shell
 docker build -t transducer/pytorch -f docker/Dockerfile .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=8g transducer/pytorch
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/<path_to_dataset>:/workspace/datasets --shm-size=8g transducer/pytorch
 ```
 
 ### Start with Tensorflow Docker
 ```shell
 docker build -t transducer/tensorflow -f docker/Dockerfile .
-docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/LibriSpeech:/workspace/datasets --shm-size=1g --ulimit memlock=-1 transducer/tensorflow
+docker run --gpus all -it --rm -v ${PWD}:/workspace/pokari -v /home/keisuke26/Documents/Chief/Datasets/<path_to_dataset>:/workspace/datasets --shm-size=1g --ulimit memlock=-1 transducer/tensorflow
 ```
 Following (un)installations are required after Docker run for tflite conversion:
 ```shell

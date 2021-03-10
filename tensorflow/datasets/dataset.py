@@ -55,40 +55,61 @@ class Dataset:
         return self.process(dataset, batch_size)
 
     def read_entries(self):
-        self.entries = []
+        entries = []
 
         for file_path in self.data_paths:
-            print(f"Reading {file_path} ...")
+            print(f"📘 Reading {file_path} ...")
             with tf.io.gfile.GFile(file_path, "r") as f:
-                self.entries += f.read().splitlines()
+                lines = f.read().splitlines()
+                for data in lines:
+                    # path, trascript, duration, offset
+                    data = data.split("\t")
 
-        self.entries = [line.split("\t", 1) for line in self.entries]
+                    data[1] = " ".join(
+                        [
+                            str(x)
+                            for x in self.text_featurizer.string2Indices(
+                                data[1]
+                            ).numpy()
+                        ]
+                    )
 
-        for i, line in enumerate(self.entries):
-            self.entries[i][-1] = " ".join(
-                [str(x) for x in self.text_featurizer.string2Indices(line[-1]).numpy()]
-            )
+                    entries.append(data)
 
-        self.entries = np.array(self.entries)
-
-        self.steps_per_epoch = len(self.entries)
+        self.entries = np.array(entries)
+        self.steps_per_epoch = len(entries)
 
     @staticmethod
     def load(record: tf.Tensor):
-        def fn(path: bytes):
+        def fn(path: bytes, duration: bytes, offset: bytes):
+            offset = float(offset.decode())
+            duration = float(duration.decode())
+            # align with librosa format
+            duration = None if duration == -1 else duration
+
             wave, rate = librosa.load(
-                os.path.expanduser(path.decode("utf-8")), sr=16000, mono=True
+                os.path.expanduser(path.decode("utf-8")),
+                sr=16000,
+                mono=True,
+                duration=duration,
+                offset=offset,
             )
             wave = tf.expand_dims(wave, axis=-1)  # add channel dim
             wave = tf.audio.encode_wav(wave, sample_rate=rate)
+
             return wave.numpy()
 
-        audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
+        # iterating over tf.Tensor is not allowed -> _, _, = list()
+        path = record[0]
+        transcript = record[1]
+        duration = record[2]
+        offset = record[3]
 
-        # audiopath, audio, transcript
-        return record[0], audio, record[1]
+        audio = tf.numpy_function(fn, inp=[path, duration, offset], Tout=tf.string)
 
-    def process(self, dataset, batch_size):
+        return audio, transcript
+
+    def process(self, dataset, batch_size: int):
         dataset = dataset.map(self.parse, num_parallel_calls=AUTOTUNE)
 
         if self.cache:
@@ -134,7 +155,7 @@ class Dataset:
         return dataset
 
     @tf.function
-    def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
+    def parse(self, audio: tf.Tensor, indices: tf.Tensor):
         with tf.device("/CPU:0"):
             audio_signal, _ = tf.audio.decode_wav(
                 audio, desired_channels=1, desired_samples=-1
