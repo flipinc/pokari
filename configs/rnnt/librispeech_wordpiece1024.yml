@@ -1,5 +1,3 @@
-# params: 62,051,613
-
 base_model:
   _target_: models.transducer.Transducer
 
@@ -11,21 +9,22 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 10
+  log_interval: 500
   # model_path: outputs/tensorflow/checkpoints/rnnt_01_char.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_char.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_wordpiece1024.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/rnnt_librispeech_char/
+    log_dir: outputs/tensorflow/logs/rnnt_wordpiece1024/
     histogram_freq: 1
     write_graph: true
     write_images: true
     update_freq: 50
     profile_batch: 0
+  debugging: false
 
 spec_augment:
   freq_masks: 2
@@ -62,9 +61,12 @@ audio_feature:
   pad_to: 16
 
 text_feature:
-  _target_: frontends.text_featurizer.CharFeaturizer
-  vocab_path: null
-  blank_at_zero: true
+  _target_: frontends.text_featurizer.WordpieceFeaturizer
+  target_vocab_size: 1024
+  max_token_length: 4
+  subwords_path: /workspace/datasets/1024_4.wordpiece
+  subwords_corpus:
+    - /workspace/datasets/tensorflow_asr_360.tsv
 
 optimizer:
   name: adam
@@ -105,6 +107,5 @@ joint:
   activation: tanh
 
 tflite:
-  model_path_from: outputs/tensorflow/checkpoints/rnnt_01_char_01.h5
+  model_path_from: outputs/tensorflow/checkpoints/rnnt_char.h5
   model_path_to: tflites/rnnt_char.tflite
-  frame_length: 1.6 

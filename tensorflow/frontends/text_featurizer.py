@@ -105,11 +105,11 @@ class TextFeaturizer(metaclass=abc.ABCMeta):
 
 class CharFeaturizer(TextFeaturizer):
     def __init__(
-        self, vocabulary: str = None, blank_at_zero: bool = True, lang: str = "en"
+        self, vocab_path: str = None, blank_at_zero: bool = True, lang: str = "en"
     ):
         super().__init__()
 
-        self.vocabulary = vocabulary
+        self.vocab_path = vocab_path
         self.blank_at_zero = blank_at_zero
         self.lang = lang
 
@@ -118,8 +118,8 @@ class CharFeaturizer(TextFeaturizer):
 
     def init_vocabulary(self):
         lines = []
-        if self.vocabulary is not None:
-            with open(self.vocabulary, "r", encoding="utf-8") as fin:
+        if self.vocab_path is not None:
+            with open(self.vocab_path, "r", encoding="utf-8") as fin:
                 lines.extend(fin.readlines())
         else:
             if self.lang == "en":

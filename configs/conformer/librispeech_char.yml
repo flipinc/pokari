@@ -62,7 +62,7 @@ audio_feature:
 
 text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
-  vocabulary: null
+  vocab_path: null
   blank_at_zero: true
 
 optimizer:

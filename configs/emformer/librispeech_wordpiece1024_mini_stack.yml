@@ -18,7 +18,7 @@ trainer:
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/emformer_librispeech_wordpiece_1024_mini_stack/
+    log_dir: outputs/tensorflow/logs/emformer_librispeech_wordpiece1024_mini_stack/
     histogram_freq: 1
     write_graph: true
     write_images: true
