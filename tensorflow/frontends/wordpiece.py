@@ -517,9 +517,9 @@ def build_from_corpus(
             print(token, file=f)
 
 
-# vocab_size needs to be added for text_featurizer, and although _get_vocab_and_ids and
-# detokenize is merged into WordpieceTokenizer in nightly version of tensorflow_text,
-# not in v2.4.3
+# vocab_size needs to be added for text_featurizer, and even though _get_vocab_and_ids
+# and detokenize is merged into WordpieceTokenizer in nightly version of
+# tensorflow_text, not in v2.4.3
 
 
 class WordpieceTokenizer(tft.WordpieceTokenizer):

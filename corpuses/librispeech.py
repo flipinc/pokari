@@ -8,10 +8,9 @@ def create_tsv(
     out_dir="/workspace/datasets",
     out_file="tensorflow_asr.tsv",
 ):
-    """
-    Create a tsv file which adheres to tensorflow format
+    """Create a tsv file which adheres to tensorflow format
 
-    PATH\tDURATION\tTRANSCRIPT
+    PATH\tTRANSCRIPT\tDURATION
 
     """
     with open(os.path.join(out_dir, out_file), "w") as out:
@@ -63,8 +62,8 @@ def create_manifest(
     out_dir="/workspace/datasets",
     out_file="manifest_train.json",
 ):
-    """
-    Create a librispeech manifest file containing following data for each audio data:
+    """Create a manifest file which adheres to PyTorch NVIDIA/NeMo format
+
     - id
     - audio_file
     - duration # 0 by default

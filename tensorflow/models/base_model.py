@@ -231,12 +231,14 @@ class BaseModel(tf.keras.Model):
 
         tensorboard_logs = {"loss": loss, "lr": learning_rate}
 
-        self.on_step_end(
+        logs = self.on_step_end(
             labels=y_true["labels"],
             encoded_outs=y_pred["encoded_outs"],
             logits=y_pred["logits"],
             logit_lens=y_pred["logit_lens"],
         )
+        if logs is not None:
+            tensorboard_logs.update(logs)
 
         self.step_counter.assign_add(1)
 

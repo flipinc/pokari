@@ -101,22 +101,30 @@ class Transducer(BaseModel):
         """
 
         TODO: Currently, because logging is not done at every step and graph mode
-        requires this func's output to be consistent, tensorboard logging is not
-        supported. Do something about it
+        requires func's output to be consistent, unnecessary logging is performed
 
         """
+        # autograph does not allow intermediate return so seed initial values
+        wer = self.wer.value
+        cer = self.cer.value
+
         if self.log_interval is not None and tf.equal(
             tf.math.floormod(self.step_counter + 1, self.log_interval), 0
         ):
             preds, _, _ = self.inference.greedy_batch_decode(encoded_outs, logit_lens)
-            preds = self.text_featurizer.iextract(preds)
-            labels = self.text_featurizer.iextract(labels)
+            preds = self.text_featurizer.indices2String(preds)
+            labels = self.text_featurizer.indices2String(labels)
 
             tf.print("❓ PRED: \n", preds[0])
             tf.print("🧩 TRUE: \n", labels[0])
 
+            wer = self.wer(preds, labels)
+            cer = self.cer(preds, labels)
+
             tf.print("📕 WER: \n", self.wer(preds, labels))
             tf.print("📘 CER: \n", self.cer(preds, labels))
+
+        return {"wer": wer, "cer": cer}
 
     def stream(
         self,

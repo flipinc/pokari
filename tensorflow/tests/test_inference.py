@@ -13,7 +13,7 @@ class MockTextFeaturizer:
     def __init__(self):
         self.blank = 0
 
-    def iextract(self, labels):
+    def indices2String(self, labels):
         return labels
 
 
@@ -52,12 +52,12 @@ class TestInference:
         pred_1, _, _ = inference.greedy_batch_decode(
             encoded_outs=encoded_outs, encoded_lens=encoded_lens
         )
-        result_1 = text_featurizer.iextract(pred_1)
+        result_1 = text_featurizer.indices2String(pred_1)
 
         pred_2 = inference.greedy_naive_batch_decode(
             encoded_outs=encoded_outs, encoded_lens=encoded_lens
         )
-        result_2 = text_featurizer.iextract(pred_2)
+        result_2 = text_featurizer.indices2String(pred_2)
 
         # have to use reduce_sum because both handle blank symbol in a different way
         assert tf.reduce_sum(result_1[0]) == tf.reduce_sum(result_2[0])
