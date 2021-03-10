@@ -84,6 +84,11 @@ class ErrorRate:
         else:
             raise ValueError("Available options are `cer` and `wer`.")
 
+        # this is a little temp hack to keep latest value. for why this is
+        # required, see a comment on `on_step_end` in models/transducer
+        self.value = 100.0
+
     def __call__(self, decode: tf.Tensor, target: tf.Tensor):
         n, d = self.func(decode, target)
-        return tf.math.divide_no_nan(n, d) * 100
+        self.value = tf.math.divide_no_nan(n, d) * 100
+        return self.value

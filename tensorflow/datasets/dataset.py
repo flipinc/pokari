@@ -66,7 +66,7 @@ class Dataset:
 
         for i, line in enumerate(self.entries):
             self.entries[i][-1] = " ".join(
-                [str(x) for x in self.text_featurizer.extract(line[-1]).numpy()]
+                [str(x) for x in self.text_featurizer.string2Indices(line[-1]).numpy()]
             )
 
         self.entries = np.array(self.entries)
