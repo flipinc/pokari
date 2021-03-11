@@ -26,6 +26,7 @@ class Transducer(BaseModel):
         1. reduce audio length (for transformer, be careful with the amount of contexts)
         2. reduce batch size
         3. reduce vocab size
+        4. set `dynamic_memory_devices` so tensorflow does not use up all memory cap
 
     """
 

@@ -16,6 +16,7 @@ onnxruntime
 numpy
 editdistance
 tqdm
+boto3
 
 # for tensorflow
 tensorflow-io

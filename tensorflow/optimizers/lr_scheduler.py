@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 import tensorflow as tf
 
@@ -5,14 +7,14 @@ import tensorflow as tf
 class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(
         self,
-        learning_rate,
-        total_steps,
-        min_lr=0.0,
-        warmup_learning_rate=0.0,
-        warmup_steps=0,
-        warmup_ratio=None,
-        hold_base_steps=0,
-        hold_base_ratio=None,
+        learning_rate: float,
+        total_steps: int,
+        min_lr: float = 0.0,
+        warmup_learning_rate: float = 0.0,
+        warmup_steps: int = 0,
+        warmup_ratio: Optional[float] = None,
+        hold_base_steps: int = 0,
+        hold_base_ratio: Optional[float] = None,
     ):
         """Cosine decay schedule with warm up period.
         Args:
@@ -35,9 +37,13 @@ class WarmupCosineAnnealing(tf.keras.optimizers.schedules.LearningRateSchedule):
 
         if warmup_steps > total_steps:
             raise ValueError("Warmup steps must be less than the total steps.")
+        if isinstance(warmup_steps, float):
+            raise ValueError("Warmup steps must be type `int`.")
 
         if hold_base_steps > total_steps:
             raise ValueError("Hold base steps must be less than the total steps.")
+        if isinstance(hold_base_steps, float):
+            raise ValueError("Hold base steps must be type `int`.")
 
         self.total_steps = total_steps
         self.min_lr = min_lr

@@ -13,6 +13,11 @@ RUN apt-get update && \
     # install cmake
     cmake protobuf-compiler
 
+# install aws cli
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install
+
 # install warprnnt. Using fork version of warp-transducer as the original
 # version does not support tf 2.4 + CUDA 11 + compute_86 (RTX 3090)
 # the author of discusses some problems here (https://github.com/TensorSpeech/TensorFlowASR/issues/54)

@@ -7,7 +7,7 @@ tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
     initialize(config_path="../configs/emformer", job_name="emformer")
-    cfgs = compose(config_name="csj_char3224_mini_stack.yml")
+    cfgs = compose(config_name="csj_char3224_tiny_stack.yml")
 
     # mxp is not supported yet (though some layers in some models do)
     if "mxp" in cfgs.trainer:
@@ -18,6 +18,11 @@ if __name__ == "__main__":
     gpus = tf.config.list_physical_devices("GPU")
     if gpus:
         visible_gpus = [gpus[i] for i in cfgs.trainer.devices]
+
+        if "dynamic_memory_devices" in cfgs.trainer:
+            for i in cfgs.trainer.dynamic_memory_devices:
+                tf.config.experimental.set_memory_growth(gpus[i], True)
+
         tf.config.set_visible_devices(visible_gpus, "GPU")
 
     strategy = tf.distribute.MirroredStrategy()
