@@ -139,7 +139,7 @@ class Inference:
                 else:
                     # recover prior state for all samples which predicted blank now/past
                     states_blank_mask = tf.cast(
-                        tf.reshape(blank_mask, [1, 1, bs, 1]), tf.float32
+                        tf.reshape(blank_mask, [1, 1, bs, 1]), states.dtype
                     )
                     unchanged_states = states * states_blank_mask
                     inverse_states_blank_mask = states_blank_mask * -1.0 + 1.0

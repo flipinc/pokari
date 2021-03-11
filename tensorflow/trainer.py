@@ -9,10 +9,8 @@ if __name__ == "__main__":
     initialize(config_path="../configs/emformer", job_name="emformer")
     cfgs = compose(config_name="csj_char3224_mini_stack.yml")
 
+    # mxp is not supported yet (though some layers in some models do)
     if "mxp" in cfgs.trainer:
-        # TODO: support mixed precision training. All layers must adapt to
-        # mixed precision including transducer loss.
-
         # policy = tf.keras.mixed_precision.Policy(cfgs.trainer.mxp)
         # tf.keras.mixed_precision.set_global_policy(policy)
         pass
