@@ -43,6 +43,11 @@ As of now, only loading from one of training examples are supported. Will suppor
 python3 tensorflow/transducer_stream_file.py
 ```
 
+### Upload a TFLite file on S3
+1) Configure AWS keys
+Run `aws configure` and follow its message.
+2) Modify and run `tensorflow/save_to_s3.py`
+
 ### Limitations on Tensorflow Version
 - CTC training is much slower compared to Transducer trianing which uses warprnnt-tensorflow for loss computation
 - Mixed precision training is not supported yet

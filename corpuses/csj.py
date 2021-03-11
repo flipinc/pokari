@@ -10,7 +10,7 @@ def create_tsv(
     "A03M0106 A05M0011 A01M0056 A03F0072 A02M0012 A03M0016 A06M0064 A06F0135 "
     "A01F0034 A01F0063 A01F0001 A01M0141 S00M0112 S00F0066 S00M0213 S00F0019 "
     "S00M0079 S01F0105 S00F0152 S00M0070 S00M0008 S00F0148",
-    max_duration=9,  # 17 is the length that can include every lines
+    max_duration=17,  # 17 is the length that can include every lines
 ):
     """Create a transcript tsv file of .sdb files in MORPH directory
 
@@ -97,6 +97,7 @@ def create_tsv(
                             word = line[5]
                             if re.search("^<.*>$", word):
                                 save(prev_end_offset)
+                                current_words = []
                                 current_offset = None
                                 prev_end_offset = None
                                 continue
@@ -114,6 +115,7 @@ def create_tsv(
                                 )
                                 print("transcript: ", line[5])
                                 save(prev_end_offset)
+                                current_words = []
                                 current_offset = None
                                 prev_end_offset = None
                                 continue
@@ -182,6 +184,7 @@ def create_tsv(
                         # if there are some words left, save
                         if len(current_words) > 0:
                             save(end_offset)
+                            current_words = []
 
 
 def create_vocab(
