@@ -72,9 +72,13 @@ class AudioFeaturizer:
             )
 
         # [B, T, nfft/2 + 1]
-        # TODO: STFT can be only run in float32. In the future, when support for mixed
-        # precision is added, stft must be separeted so it can run in float32
         if self.stft_type == "tensorflow":
+            mxp_enabled = False
+            if x.dtype != tf.float32:
+                mxp_enabled = True
+                x = tf.cast(x, tf.float32)
+
+            # stft can only be run in tf.float32
             stfts = tf.signal.stft(
                 x,
                 frame_length=self.win_length,
@@ -82,6 +86,9 @@ class AudioFeaturizer:
                 fft_length=self.n_fft,
                 pad_end=True,
             )
+
+            if mxp_enabled:
+                stfts = tf.cast(stfts, tf.float16)
 
             # stft returns real & imag, so convert to magnitude
             # x1 for energy spectrogram, x2 for power spectrum
@@ -96,6 +103,7 @@ class AudioFeaturizer:
             sample_rate=self.sample_rate,
             lower_edge_hertz=0.0,
             upper_edge_hertz=(self.sample_rate / 2),
+            dtype=spectrograms.dtype,
         )
 
         # mel spectrograms -> [B, T, m_mels]
@@ -117,7 +125,8 @@ class AudioFeaturizer:
         mask = tf.expand_dims(tf.range(tf.shape(x)[-1]), 0)
         # [B, T_max] >= [B, 1] -> [B, T_max]
         mask = tf.tile(mask, [tf.shape(x)[0], 1]) >= tf.expand_dims(audio_lens, 1)
-        x = tf.where(tf.expand_dims(mask, 1), 0.0, x)
+        zero = tf.cast(0.0, x.dtype)  # for mxp training
+        x = tf.where(tf.expand_dims(mask, 1), zero, x)
 
         if self.pad_to > 0:
             pad_amount = tf.shape(x)[-1] % self.pad_to
@@ -193,13 +202,13 @@ class AudioFeaturizer:
             # ref: https://github.com/tensorflow/tensorflow/issues/40221
 
             mean_list = tf.TensorArray(
-                tf.float32,
+                x.dtype,
                 size=bs,
                 clear_after_read=True,
                 element_shape=tf.TensorShape((self.n_mels)),
             )
             std_list = tf.TensorArray(
-                tf.float32,
+                x.dtype,
                 size=bs,
                 clear_after_read=True,
                 element_shape=tf.TensorShape((self.n_mels)),
@@ -220,7 +229,7 @@ class AudioFeaturizer:
             return (x - tf.expand_dims(x_mean, axis=2)) / tf.expand_dims(x_std, axis=2)
         elif self.normalize_type == "per_signal":
             new_x = tf.TensorArray(
-                tf.float32,
+                x.dtype,
                 size=bs,
                 clear_after_read=True,
             )
@@ -244,7 +253,7 @@ class AudioFeaturizer:
         Librosa center pads the signal with reflection whereas tensorflow pad from right
         with zeros by default.
 
-        TODO: this function is not tested, so do not use yet.
+        TODO: this function is not tested. Do not use yet.
 
         """
         signal = tf.pad(

@@ -64,11 +64,11 @@ class TransducerPredictor(tf.keras.Model):
             for idx in range(self.num_layers):
                 h = tf.random.normal(
                     (batch_size, self.dim_model),
-                    dtype=self.dtype,
+                    dtype=self.compute_dtype,
                 )
                 c = tf.random.normal(
                     (batch_size, self.dim_model),
-                    dtype=self.dtype,
+                    dtype=self.compute_dtype,
                 )
                 state = tf.stack([h, c], axis=0)
                 states.append(state)
@@ -77,11 +77,11 @@ class TransducerPredictor(tf.keras.Model):
             for idx in range(self.num_layers):
                 h = tf.zeros(
                     (batch_size, self.dim_model),
-                    dtype=self.dtype,
+                    dtype=self.compute_dtype,
                 )
                 c = tf.zeros(
                     (batch_size, self.dim_model),
-                    dtype=self.dtype,
+                    dtype=self.compute_dtype,
                 )
                 state = tf.stack([h, c], axis=0)
                 states.append(state)
