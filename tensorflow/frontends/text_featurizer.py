@@ -105,13 +105,18 @@ class TextFeaturizer(metaclass=abc.ABCMeta):
 
 class CharFeaturizer(TextFeaturizer):
     def __init__(
-        self, vocab_path: str = None, blank_at_zero: bool = True, lang: str = "en"
+        self,
+        vocab_path: str = None,
+        blank_at_zero: bool = True,
+        lang: str = "en",
+        normalize: bool = False,
     ):
         super().__init__()
 
         self.vocab_path = vocab_path
         self.blank_at_zero = blank_at_zero
         self.lang = lang
+        self.normalize = normalize
 
         self.init_vocabulary()
         self.init_upoints()
@@ -132,16 +137,19 @@ class CharFeaturizer(TextFeaturizer):
         self.blank = 0 if self.blank_at_zero else None
         self.tokens2indices = {}
         self.tokens = []
+
         index = 1 if self.blank == 0 else 0
         for line in lines:
-            line = self.preprocess_text(line)
-            if line.startswith("#") or not line:
-                continue
+            if self.normalize:
+                line = self.preprocess_text(line)
+
             self.tokens2indices[line[0]] = index
             self.tokens.append(line[0])
             index += 1
+
         if self.blank is None:
             self.blank = len(self.tokens)  # blank not at zero
+
         self.vocab_array = self.tokens.copy()
         self.tokens.insert(self.blank, "")  # add blank token to tokens
         self.num_classes = len(self.tokens)
@@ -153,7 +161,9 @@ class CharFeaturizer(TextFeaturizer):
         )
 
     def string2Indices(self, text: str) -> tf.Tensor:
-        text = self.preprocess_text(text)
+        if self.normalize:
+            text = self.preprocess_text(text)
+
         text = list(text.strip())  # remove trailing space
         indices = [self.tokens2indices[token] for token in text]
         return tf.convert_to_tensor(indices, dtype=tf.int32)
@@ -181,6 +191,7 @@ class WordpieceFeaturizer(TextFeaturizer):
         subwords_corpus: str = None,
         target_vocab_size: int = 1024,
         max_token_length: int = 4,
+        normalize: bool = False,
     ):
         """Text featurizer based on Wordpiece
 
@@ -197,6 +208,8 @@ class WordpieceFeaturizer(TextFeaturizer):
         self.max_token_length = max_token_length
         self.max_corpus_chars = None
         self.reserved_tokens = [self.PAD_TOKEN]
+
+        self.normalize = normalize
 
         if subwords_path and os.path.exists(subwords_path):
             self.subwords = self.load_from_file(subwords_path)
@@ -256,7 +269,9 @@ class WordpieceFeaturizer(TextFeaturizer):
         return subwords
 
     def string2Indices(self, text: str) -> tf.Tensor:
-        text = self.preprocess_text(text)
+        if self.normalize:
+            text = self.preprocess_text(text)
+
         # remove trailing space
         text = text.strip()
         splitted_text = text.split()
@@ -295,6 +310,7 @@ class DeprecatedWordpieceFeaturizer(TextFeaturizer):
         subwords_corpus: str = None,
         target_vocab_size: int = 1024,
         max_token_length: int = 4,
+        normalize: bool = False,
     ):
         super().__init__()
 
@@ -304,6 +320,8 @@ class DeprecatedWordpieceFeaturizer(TextFeaturizer):
         # unlike undeprecated version, tds.deprecated.text.SubwordTextEncoder
         # automatically register blank token to zero index
         self.reserved_tokens = None
+
+        self.normalize = normalize
 
         if subwords_path and os.path.exists(subwords_path):
             self.subwords = self.load_from_file(subwords_path)
@@ -357,7 +375,9 @@ class DeprecatedWordpieceFeaturizer(TextFeaturizer):
         return self.subwords.save_to_file(filename_prefix)
 
     def string2Indices(self, text: str) -> tf.Tensor:
-        text = self.preprocess_text(text)
+        if self.normalize:
+            text = self.preprocess_text(text)
+
         text = text.strip()  # remove trailing space
         indices = self.subwords.encode(text)
         return tf.convert_to_tensor(indices, dtype=tf.int32)

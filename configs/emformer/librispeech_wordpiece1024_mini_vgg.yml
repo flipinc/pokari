@@ -67,7 +67,8 @@ text_feature:
   subwords_path: /workspace/datasets/1024_4.wordpiece
   subwords_corpus:
     - /workspace/datasets/tensorflow_asr_360.tsv
-
+  normalize: true
+  
 optimizer:
   name: adam
   learning_rate: 0.0005
