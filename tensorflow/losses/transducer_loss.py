@@ -3,6 +3,7 @@ from tensorflow.python.keras.utils import losses_utils
 from tensorflow.python.ops.gen_array_ops import matrix_diag_part_v2
 
 try:
+    # generally, warprnnt is about 4 times faster
     from warprnnt_tensorflow import rnnt_loss as warp_rnnt_loss
 
     use_warprnnt = True
