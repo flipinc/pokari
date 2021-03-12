@@ -11,7 +11,7 @@ def create_vocab(
 ):
     """Create a Japanese vocabulary from given tsv file
 
-    CSJ has 3265 characters in total
+    CSJ has 3265 characters in total if all data is used
 
     """
     vocab_freq = {}

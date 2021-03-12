@@ -66,6 +66,7 @@ text_feature:
   _target_: frontends.text_featurizer.CharFeaturizer
   vocab_path: null
   blank_at_zero: true
+  normalize: true
 
 optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
   name: adam

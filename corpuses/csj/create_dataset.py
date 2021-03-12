@@ -16,10 +16,16 @@ def create_dataset(
     path_to_train_words="/workspace/datasets/csj_train_word.tsv",
     path_to_val_words="/workspace/datasets/csj_val_word.tsv",
     out_dir="/workspace/datasets",
-    max_duration=17,  # 17 is the length that can include every lines
+    min_duration=2,
+    max_duration=17,
     allowed_gap=0.5,
 ):
     """Create a transcript tsv file from all words created by `create_word.py`
+
+    Args:
+        min_duration: If this is too small, some ops like specaugment may fail and
+        attention performance will degrade if this is smaller than attention span.
+        Default value is 2 because it is longer than emformer's chunk length.
 
     Number of characters/subwords to be used
     - CHR: 3084 -> https://arxiv.org/pdf/2102.07935.pdf
@@ -64,18 +70,21 @@ def create_dataset(
                         ):
                             transcript += word
                         else:
+                            duration = previous_end_offset - current_start_offset
                             if (
                                 allowed_gap < (start_offset - previous_end_offset)
-                                or max_duration
-                                < (previous_end_offset - current_start_offset)
+                                or max_duration < duration
                                 or current_path != path
                             ):
-                                if not re.search("×", transcript):
+                                if (
+                                    not re.search("×", transcript)
+                                    and min_duration < duration
+                                ):
                                     writer.writerow(
                                         [
                                             current_path,
                                             transcript,
-                                            previous_end_offset - current_start_offset,
+                                            duration,
                                             current_start_offset,
                                         ]
                                     )
@@ -91,12 +100,13 @@ def create_dataset(
                         previous_end_offset = end_offset
 
                     if len(transcript) > 0:
-                        if not re.search("×", transcript):
+                        duration = end_offset - current_start_offset
+                        if not re.search("×", transcript) and min_duration < duration:
                             writer.writerow(
                                 [
                                     current_path,
                                     transcript,
-                                    end_offset - current_start_offset,
+                                    duration,
                                     current_start_offset,
                                 ]
                             )
