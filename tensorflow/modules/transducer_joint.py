@@ -67,5 +67,6 @@ class TransducerJoint(tf.keras.Model):
         del f, g
 
         joint_outs = self.linear_joint(joint_inputs)
+        del joint_inputs
 
         return joint_outs
