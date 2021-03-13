@@ -290,7 +290,7 @@ class EmformerEncoder(tf.keras.Model):
         )
         # need to explicitly set shape for numpy mask, otherwise build() fails
         mask.set_shape([None, 1, None, None])  # [B, 1, Total_R + Tmax, Total_R + Tmax]
-        if mask.dtype != self.compute_dtype:  # for mxp
+        if "2.4" in tf.__version__ and mask.dtype != self.compute_dtype:  # for mxp
             mask = tf.cast(mask, self.compute_dtype)
 
         # 4. Hard copy right context and prepare input for the first iteration
@@ -418,18 +418,23 @@ class EmformerBlock(tf.keras.layers.Layer):
             mask: Only used at training time. [B, 1, M, M]
 
         """
+        if "2.3" in tf.__version__:
+            dtype = self.dtype
+        elif "2.4" in tf.__version__:
+            dtype = self.compute_dtype
+
         # 1. get attention scores -> [B, H, N, M]
         # doing the division to either query or key instead of their product saves
         # some computation
-        depth = tf.constant(self.head_size, dtype=self.compute_dtype)  # for mxp
+        depth = tf.constant(self.head_size, dtype=dtype)  # for mxp
         q /= tf.sqrt(depth)
         attn_scores = tf.einsum("...NHO,...MHO->...HNM", q, k)
 
         # 2. apply mask and softmax
         if mask is not None:
-            if self.compute_dtype == tf.float16:
+            if dtype == tf.float16:
                 inf_min = tf.float16.min
-                inverse_mask = tf.cast((1.0 - mask), self.compute_dtype)
+                inverse_mask = tf.cast((1.0 - mask), dtype)
             else:
                 # using float(-inf) or -math.inf gives nan after softmax
                 inf_min = -10e9

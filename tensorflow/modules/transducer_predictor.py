@@ -60,29 +60,21 @@ class TransducerPredictor(tf.keras.Model):
         # during build
         states = []
 
+        if "2.3" in tf.__version__:
+            dtype = self.dtype
+        elif "2.4" in tf.__version__:
+            dtype = self.compute_dtype
+
         if self.random_state_sampling and training:
             for idx in range(self.num_layers):
-                h = tf.random.normal(
-                    (batch_size, self.dim_model),
-                    dtype=self.compute_dtype,
-                )
-                c = tf.random.normal(
-                    (batch_size, self.dim_model),
-                    dtype=self.compute_dtype,
-                )
+                h = tf.random.normal((batch_size, self.dim_model), dtype=dtype)
+                c = tf.random.normal((batch_size, self.dim_model), dtype=dtype)
                 state = tf.stack([h, c], axis=0)
                 states.append(state)
-
         else:
             for idx in range(self.num_layers):
-                h = tf.zeros(
-                    (batch_size, self.dim_model),
-                    dtype=self.compute_dtype,
-                )
-                c = tf.zeros(
-                    (batch_size, self.dim_model),
-                    dtype=self.compute_dtype,
-                )
+                h = tf.zeros((batch_size, self.dim_model), dtype=dtype)
+                c = tf.zeros((batch_size, self.dim_model), dtype=dtype)
                 state = tf.stack([h, c], axis=0)
                 states.append(state)
 

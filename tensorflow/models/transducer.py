@@ -1,5 +1,3 @@
-import os
-
 import librosa
 import numpy as np
 import tensorflow as tf
@@ -111,8 +109,8 @@ class Transducer(BaseModel):
 
         """
         # autograph does not allow intermediate return so seed initial values
-        wer = self.wer.value
-        cer = self.cer.value
+        wer = self.wer_value
+        cer = self.cer_value
 
         if self.log_interval is not None and tf.equal(
             tf.math.floormod(self.step_counter + 1, self.log_interval), 0
@@ -127,8 +125,12 @@ class Transducer(BaseModel):
             wer = self.wer(preds, labels)
             cer = self.cer(preds, labels)
 
-            tf.print("📕 WER: \n", self.wer(preds, labels))
-            tf.print("📘 CER: \n", self.cer(preds, labels))
+            # update metrics
+            self.wer_value.assign(wer)
+            self.cer_value.assign(cer)
+
+            tf.print("📕 WER: \n", wer)
+            tf.print("📘 CER: \n", cer)
 
         return {"wer": wer, "cer": cer}
 
@@ -144,15 +146,23 @@ class Transducer(BaseModel):
             enable_graph: Enable graph mode and hide intermediate print outputs
 
         """
-        path, transcript = self.train_ds.entries[manifest_idx]
+        path, transcript, duration, offset = self.train_ds.entries[manifest_idx]
         tf.print(f"🎙 Using {path}...")
 
+        offset = float(offset)
+        duration = float(duration)
+        # align with librosa format
+        duration = None if duration == -1 else duration
+
         audio_signal, native_rate = librosa.load(
-            os.path.expanduser(path),
+            path,
             sr=self.audio_featurizer.sample_rate,
             mono=True,
+            duration=duration,
+            offset=offset,
             dtype=np.float32,
         )
+
         audio_signal = tf.convert_to_tensor(audio_signal)
         transcript = tf.strings.unicode_encode(
             self.text_featurizer.indices2upoints(
