@@ -78,7 +78,7 @@ optimizer:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
     warmup_steps: 40000
     warmup_learning_rate: 1e-6
-    hold_base_steps: 0.6
+    hold_base_ratio: 0.6
 
 encoder:
   _target_: modules.conformer_encoder.ConformerEncoder

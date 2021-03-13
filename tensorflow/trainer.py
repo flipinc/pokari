@@ -6,8 +6,8 @@ import tensorflow as tf
 tf.keras.backend.clear_session()
 
 if __name__ == "__main__":
-    initialize(config_path="../configs/emformer", job_name="emformer")
-    cfgs = compose(config_name="csj_char3265_tiny_stack.yml")
+    initialize(config_path="../configs/conformer", job_name="conformer")
+    cfgs = compose(config_name="csj_char3265.yml")
 
     # TODO: mxp is not supported yet (though some layers in some models do)
     if "mxp" in cfgs.trainer:
