@@ -1,4 +1,4 @@
-# params: 62,231,861
+# this has not yet succeeded
 
 base_model:
   _target_: models.transducer.Transducer
@@ -11,22 +11,21 @@ trainer:
   workers: 4
   max_queue_size: 10
   use_multiprocessing: false
-  log_interval: 10
-  # model_path: outputs/tensorflow/checkpoints/emformer_01_char3265_mini_stack.h5
+  log_interval: 500
+  # model_path: 
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_{epoch:02d}_char3265_mini_stack.h5
+    filepath: outputs/tensorflow/checkpoints/rnnt_{epoch:02d}_csj_char3265.h5
     save_best_only: true
     save_weights_only: false
     save_freq: 2000
     monitor: loss
   tensorboard:
-    log_dir: outputs/tensorflow/logs/emformer_csj_char3265_mini_stack/
+    log_dir: outputs/tensorflow/logs/rnnt_csj_char3265/
     histogram_freq: 1
     write_graph: true
     write_images: true
     update_freq: 50
     profile_batch: 0
-  debugging: false
 
 spec_augment:
   freq_masks: 2
@@ -68,18 +67,17 @@ text_feature:
   blank_at_zero: true
   normalize: false # important
 
-optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
+optimizer:
   name: adam
   learning_rate: 0.0005
   beta_1: 0.9
   beta_2: 0.999
- 
+
   lr_scheduler:
     _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
-    min_lr: 0.0000025 # 2e-6
     warmup_steps: 80000
     warmup_learning_rate: 1e-6
-    hold_base_steps: 80000
+    hold_base_ratio: 0.6
 
   variational_noise:
     mean: 0
@@ -87,25 +85,18 @@ optimizer: # from https://arxiv.org/pdf/2002.02562.pdf
     start_step: 80000
 
 encoder:
-  _target_: modules.emformer_encoder.EmformerEncoder
-  num_layers: 18 # 26 for medium latency, 18 for low latency in paper
-  num_heads: 8
-  dim_model: 512
-  dim_ffn: 2048
-  dropout_attn: 0.1
-  dropout_ffn: 0.1
-  subsampling: stack # frame stacking in paper
-  subsampling_factor: 4
-  subsampling_dim: 64 # 64 in https://arxiv.org/pdf/1910.12977.pdf
-  left_length: 20 # 800ms / (4 stacked frames x 10ms per frame)
-  chunk_length: 32 # 1280ms / (4 stacked frames x 10ms per frame)
-  right_length: 8 # 320ms / (4 stacked frames x 10ms per frame)
+  _target_: modules.rnnt_encoder.RNNTEncoder
+  dim_model: 320  # 640 in paper
+  num_units: 1024 # 2048 in paper
+  num_layers: 8 # 8 in paper
+  reduction_indices: [0, 2] # [0, 2] in paper
+  reduction_factors: [3, 2] # [3, 2] in paper
 
 predictor:
   _target_: modules.transducer_predictor.TransducerPredictor
-  num_layers: 1 # 2 in paper
-  embed_dim: 320 # 256 in paper
-  dim_model: 512 # 512 in paper
+  num_layers: 2 # 2 in paper
+  embed_dim: 320 # 640 in paper
+  dim_model: 1024 # 2048 in paper
   dropout: 0.1
   random_state_sampling: true
 
@@ -113,7 +104,3 @@ joint:
   _target_: modules.transducer_joint.TransducerJoint
   dim_model: 1024 # 640 in paper
   activation: tanh
-
-tflite:
-  model_path_from: outputs/tensorflow/checkpoints/emformer_01_char3265_mini_stack.h5
-  model_path_to: tflites/emformer_char3265_mini_stack.tflite

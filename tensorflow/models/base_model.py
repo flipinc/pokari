@@ -33,8 +33,13 @@ class BaseModel(tf.keras.Model):
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
         # it is better to just disable all training logics when they are unused
         if setup_training:
+            self.step_counter = tf.Variable(0, dtype=tf.int32, trainable=False)
+
             self.wer = ErrorRate(kind="wer")
             self.cer = ErrorRate(kind="cer")
+
+            self.wer_value = tf.Variable(100.0, dtype=tf.float32, trainable=False)
+            self.cer_value = tf.Variable(100.0, dtype=tf.float32, trainable=False)
 
             self.debugging = (
                 cfgs.trainer.debugging if "debugging" in cfgs.trainer else None
@@ -43,7 +48,6 @@ class BaseModel(tf.keras.Model):
             self.log_interval = (
                 cfgs.trainer.log_interval if "log_interval" in cfgs.trainer else None
             )
-            self.step_counter = tf.Variable(0, dtype=tf.int32, trainable=False)
 
             (
                 train_dl,
