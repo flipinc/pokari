@@ -17,7 +17,10 @@ multiprocessing = False
 
 if __name__ == "__main__":
     initialize(config_path="../configs/emformer", job_name="emformer")
-    cfgs = compose(config_name="librispeech_char_mini_vgg.yml")
+    cfgs = compose(config_name="csj_char3265_mini_stack.yml")
+
+    # text featurizer will not be used. to avoid import error, override this value
+    cfgs.text_feature.vocab_path = None
 
     # used for getting initial states
     transducer = Transducer(cfgs=cfgs, global_batch_size=1, setup_training=False)
