@@ -1,5 +1,3 @@
-import logging
-
 import editdistance
 import torch
 from modules.transducer_decoder import TransducerDecoder
@@ -99,9 +97,9 @@ class TransducerWER(Metric):
             hypotheses, _ = self.decoder(encoder_output, encoded_lengths)
 
         if self.log_prediction:
-            logging.info("\n")
-            logging.info(f"reference :{references[0]}")
-            logging.info(f"predicted :{hypotheses[0]}")
+            print("\n")
+            print(f"reference :{references[0]}")
+            print(f"predicted :{hypotheses[0]}")
 
         for h, r in zip(hypotheses, references):
             if self.use_cer:

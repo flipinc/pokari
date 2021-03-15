@@ -1,7 +1,16 @@
 import tensorflow as tf
 
 
-class TransducerJoint(tf.keras.layers.Layer):
+class TransducerJoint(tf.keras.Model):
+    """
+
+    TODO: Sometimes, encoder/predictor dim is not always equal to linear layer dim in
+    joint network. To adapt to these cases, the number of dims in linear layer must
+    be configurable
+    ref: https://arxiv.org/pdf/2010.14665.pdf,
+
+    """
+
     def __init__(
         self,
         num_classes: int,
@@ -39,22 +48,25 @@ class TransducerJoint(tf.keras.layers.Layer):
     def call(self, inputs, training=False, **kwargs):
         """
 
-        encoder_outputs: [B, T, D_e]
-        predictor_outputs: [B, U, D_p]
-
+        Args:
+            encoder_outputs: [B, T, D_e]
+            predictor_outputs: [B, U, D_p]
 
         """
         encoder_outputs, predictor_outputs = inputs
 
         f = self.linear_encoder(encoder_outputs)
         f = tf.expand_dims(f, axis=2)  # [B, T, 1, D]
+        del encoder_outputs
 
         g = self.linear_predictor(predictor_outputs)
         g = tf.expand_dims(g, axis=1)  # [B, 1, U, D]
+        del predictor_outputs
 
         joint_inputs = self.activation(f + g)
         del f, g
 
         joint_outs = self.linear_joint(joint_inputs)
+        del joint_inputs
 
         return joint_outs

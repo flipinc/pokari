@@ -4,14 +4,13 @@ import os
 
 
 def create_tsv(
-    path_to_dataset="/workspace/datasets/train/train-clean-100",
+    out_file,
+    path_to_dataset,
     out_dir="/workspace/datasets",
-    out_file="tensorflow_asr.tsv",
 ):
-    """
-    Create a tsv file which adheres to TensorflowASR format
+    """Create a tsv file which adheres to tensorflow format
 
-    PATH\tDURATION\tTRANSCRIPT
+    PATH\tTRANSCRIPT\tDURATION\tOFFSET
 
     """
     with open(os.path.join(out_dir, out_file), "w") as out:
@@ -55,16 +54,18 @@ def create_tsv(
 
                                             text = text.lower()
 
-                                            tsv_writer.writerow([audio_path, text])
+                                            tsv_writer.writerow(
+                                                [audio_path, text, -1, 0.0]
+                                            )
 
 
 def create_manifest(
-    path_to_dataset="/workspace/datasets/train/train-clean-100",
+    out_file,
+    path_to_dataset,
     out_dir="/workspace/datasets",
-    out_file="manifest_train.json",
 ):
-    """
-    Create a librispeech manifest file containing following data for each audio data:
+    """Create a manifest file which adheres to PyTorch NVIDIA/NeMo format
+
     - id
     - audio_file
     - duration # 0 by default
@@ -122,18 +123,27 @@ def create_manifest(
 
 
 if __name__ == "__main__":
-    # create_tsv()
+    # create_tsv(
+    #     path_to_dataset="/workspace/datasets/train-large/train-clean-360",
+    #     out_dir="/workspace/datasets",
+    #     out_file="tensorflow_asr_360.tsv",
+    # )
 
-    create_tsv(
-        path_to_dataset="/workspace/datasets/dev/dev-clean",
-        out_dir="/workspace/datasets",
-        out_file="tensorflow_asr_val.tsv",
-    )
+    # create_tsv(
+    #     path_to_dataset="/workspace/datasets/dev/dev-clean",
+    #     out_dir="/workspace/datasets",
+    #     out_file="tensorflow_asr_val.tsv",
+    # )
 
-    # create_manifest()
+    # create_manifest(
+    #     path_to_dataset="/workspace/datasets/train-large/train-clean-360",
+    #     out_dir="/workspace/datasets",
+    #     out_file="manifest_train_360.json",
+    # )
 
     # create_manifest(
     #     path_to_dataset="/workspace/datasets/dev/dev-clean",
     #     out_dir="/workspace/datasets",
     #     out_file="manifest_val.json",
     # )
+    pass

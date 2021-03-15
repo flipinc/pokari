@@ -8,9 +8,23 @@ tf.keras.backend.clear_session()
 
 
 def convert_to_tflite(cfgs: DictConfig):
-    transducer = Transducer(cfgs=cfgs, global_batch_size=1)
+    if "batch_size" in cfgs.tflite:
+        batch_size = cfgs.tflite.batch_size
+    else:
+        batch_size = 1
 
-    tf_func = transducer.make_tflite_function()
+    transducer = Transducer(
+        cfgs=cfgs, global_batch_size=batch_size, setup_training=False
+    )
+    transducer._build()
+
+    transducer.load_weights(cfgs.tflite.model_path_from)
+
+    if batch_size > 1:
+        tf_func = transducer.make_batch_tflite_function(cfgs.tflite.batch_size)
+    else:
+        tf_func = transducer.make_one_tflite_function()
+
     concrete_func = tf_func.get_concrete_function()
 
     converter = tf.lite.TFLiteConverter.from_concrete_functions([concrete_func])
@@ -23,16 +37,16 @@ def convert_to_tflite(cfgs: DictConfig):
 
     tflite_model = converter.convert()
 
-    print("🎉 Successfully converted to tflite model")
-
     return tflite_model
 
 
-initialize(config_path="../configs/emformer", job_name="emformer")
-cfgs = compose(config_name="librispeech_wordpiece.yml")
-
 if __name__ == "__main__":
+    initialize(config_path="../configs/emformer", job_name="emformer")
+    cfgs = compose(config_name="csj_char3265_mini_stack.yml")
+
     tflite_model = convert_to_tflite(cfgs)
 
-    with open(cfgs.tflite.model_path, "wb") as tflite_out:
+    with open(cfgs.tflite.model_path_to, "wb") as tflite_out:
         tflite_out.write(tflite_model)
+
+    print("🎉 Successfully converted to tflite model")

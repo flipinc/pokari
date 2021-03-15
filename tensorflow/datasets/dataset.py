@@ -1,13 +1,9 @@
-import math
 import os
 
 import librosa
 import numpy as np
 import tensorflow as tf
-import tensorflow_io as tfio
 
-BUFFER_SIZE = 100
-TFRECORD_SHARDS = 16
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
@@ -21,22 +17,31 @@ class Dataset:
         cache: bool = False,
         shuffle: bool = False,
         drop_remainder: bool = True,
-        buffer_size: int = BUFFER_SIZE,
+        buffer_size: int = 100,
         num_print_sample_data: int = 0,
         **kwargs,
     ):
+        """
+
+        Args:
+            stage (str): the name of this dataset. currently not used
+            cache (bool): cache WHOLE transformed dataset to memory
+            shuffle (bool): shuffle tf.data.Dataset
+            buffer_size (int): shuffle buffer size
+            drop_remainder (bool): drop remainder for multi gpu training
+
+        """
+        if buffer_size <= 0 and shuffle:
+            raise ValueError("buffer_size must be positive when shuffle is on")
+
         self.audio_featurizer = audio_featurizer
         self.text_featurizer = text_featurizer
         self.data_paths = data_paths
-        self.cache = cache  # whether to cache WHOLE transformed dataset to memory
-        self.shuffle = shuffle  # whether to shuffle tf.data.Dataset
-        if buffer_size <= 0 and shuffle:
-            raise ValueError("buffer_size must be positive when shuffle is on")
-        self.buffer_size = buffer_size  # shuffle buffer size
-        self.stage = stage  # for defining tfrecords files
-        self.drop_remainder = (
-            drop_remainder  # whether to drop remainder for multi gpu training
-        )
+        self.cache = cache
+        self.shuffle = shuffle
+        self.buffer_size = buffer_size
+        self.drop_remainder = drop_remainder
+
         self.steps_per_epoch = None  # for better training visualization
 
         self.num_print_sample_data = num_print_sample_data
@@ -50,41 +55,61 @@ class Dataset:
         return self.process(dataset, batch_size)
 
     def read_entries(self):
-        self.entries = []
+        entries = []
 
         for file_path in self.data_paths:
-            print(f"Reading {file_path} ...")
+            print(f"📘 Reading {file_path} ...")
             with tf.io.gfile.GFile(file_path, "r") as f:
-                self.entries += f.read().splitlines()
+                lines = f.read().splitlines()
+                for data in lines:
+                    # path, trascript, duration, offset
+                    data = data.split("\t")
 
-        self.entries = [line.split("\t", 1) for line in self.entries]
+                    data[1] = " ".join(
+                        [
+                            str(x)
+                            for x in self.text_featurizer.string2Indices(
+                                data[1]
+                            ).numpy()
+                        ]
+                    )
 
-        for i, line in enumerate(self.entries):
-            self.entries[i][-1] = " ".join(
-                [str(x) for x in self.text_featurizer.extract(line[-1]).numpy()]
-            )
+                    entries.append(data)
 
-        self.entries = np.array(self.entries)
-
-        if self.shuffle:
-            np.random.shuffle(self.entries)  # Mix transcripts.tsv
-
-        self.steps_per_epoch = len(self.entries)
+        self.entries = np.array(entries)
+        self.steps_per_epoch = len(entries)
 
     @staticmethod
     def load(record: tf.Tensor):
-        def fn(path: bytes):
+        def fn(path: bytes, duration: bytes, offset: bytes):
+            offset = float(offset.decode())
+            duration = float(duration.decode())
+            # align with librosa format
+            duration = None if duration == -1 else duration
+
             wave, rate = librosa.load(
-                os.path.expanduser(path.decode("utf-8")), sr=None, mono=True
+                os.path.expanduser(path.decode("utf-8")),
+                sr=16000,
+                mono=True,
+                duration=duration,
+                offset=offset,
             )
-            wave = tf.audio.encode_wav(tf.expand_dims(wave, axis=-1), sample_rate=rate)
+            wave = tf.expand_dims(wave, axis=-1)  # add channel dim
+            wave = tf.audio.encode_wav(wave, sample_rate=rate)
+
             return wave.numpy()
 
-        audio = tf.numpy_function(fn, inp=[record[0]], Tout=tf.string)
+        # iterating over tf.Tensor is not allowed -> _, _, = list()
+        path = record[0]
+        transcript = record[1]
+        duration = record[2]
+        offset = record[3]
 
-        return record[0], audio, record[1]
+        audio = tf.numpy_function(fn, inp=[path, duration, offset], Tout=tf.string)
 
-    def process(self, dataset, batch_size):
+        return audio, transcript
+
+    def process(self, dataset, batch_size: int):
         dataset = dataset.map(self.parse, num_parallel_calls=AUTOTUNE)
 
         if self.cache:
@@ -125,26 +150,19 @@ class Dataset:
 
         dataset = dataset.prefetch(AUTOTUNE)
 
-        if self.drop_remainder:
-            self.steps_per_epoch = math.floor(float(len(dataset)) / float(batch_size))
-        else:
-            self.steps_per_epoch = math.ceil(float(len(dataset)) / float(batch_size))
+        self.steps_per_epoch = len(dataset)
 
         return dataset
 
     @tf.function
-    def parse(self, path: tf.Tensor, audio: tf.Tensor, indices: tf.Tensor):
-        def tf_read_raw_audio(audio: tf.Tensor, sample_rate=16000):
-            wave, rate = tf.audio.decode_wav(
+    def parse(self, audio: tf.Tensor, indices: tf.Tensor):
+        with tf.device("/CPU:0"):
+            audio_signal, _ = tf.audio.decode_wav(
                 audio, desired_channels=1, desired_samples=-1
             )
-            resampled = tfio.audio.resample(
-                wave, rate_in=tf.cast(rate, dtype=tf.int64), rate_out=sample_rate
-            )
-            return tf.reshape(resampled, shape=[-1])  # reshape for using tf.signal
-
-        with tf.device("/CPU:0"):
-            audio_signal = tf_read_raw_audio(audio, self.audio_featurizer.sample_rate)
+            audio_signal = tf.reshape(
+                audio_signal, shape=[-1]
+            )  # reshape for using tf.signal
 
             audio_len = tf.cast(tf.shape(audio_signal)[0], tf.int32)
 

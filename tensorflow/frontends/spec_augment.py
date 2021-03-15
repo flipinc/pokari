@@ -14,7 +14,13 @@ class SpectrogramAugmentation:
     time_width - maximum number of time steps to be cut in one segment.
     """
 
-    def __init__(self, freq_masks=0, time_masks=0, freq_width=10, time_width=10):
+    def __init__(
+        self,
+        freq_masks=0,
+        time_masks=0,
+        freq_width=10,
+        time_width=10,
+    ):
         self.freq_mask = FreqencyMask(num_masks=freq_masks, mask_width=freq_width)
         self.time_mask = TimeMask(num_masks=time_masks, mask_width=time_width)
 
@@ -43,7 +49,8 @@ class FreqencyMask:
         T, F = shape_list(spectrogram, out_type=tf.int32)
         for _ in range(self.num_masks):
             f = tf.random.uniform([], minval=0, maxval=self.mask_width, dtype=tf.int32)
-            f = tf.minimum(f, F)
+            # -1 because minval must be larger than maxval. min=0 max=0 is not allowed
+            f = tf.minimum(f, F - 1)
             f0 = tf.random.uniform([], minval=0, maxval=(F - f), dtype=tf.int32)
             mask = tf.concat(
                 [
@@ -75,12 +82,11 @@ class TimeMask:
         T, F = shape_list(spectrogram, out_type=tf.int32)
         for _ in range(self.num_masks):
             t = tf.random.uniform([], minval=0, maxval=self.mask_width, dtype=tf.int32)
-            t = tf.minimum(
-                t,
-                tf.cast(
-                    tf.cast(T, dtype=tf.float32) * self.p_upperbound, dtype=tf.int32
-                ),
+            upperbound = tf.cast(
+                tf.cast(T, dtype=tf.float32) * self.p_upperbound, dtype=tf.int32
             )
+            # -1 because minval must be larger than maxval. min=0 max=0 is not allowed
+            t = tf.minimum(t, upperbound - 1)
             t0 = tf.random.uniform([], minval=0, maxval=(T - t), dtype=tf.int32)
             mask = tf.concat(
                 [

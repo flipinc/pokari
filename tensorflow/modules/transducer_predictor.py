@@ -1,18 +1,28 @@
 import tensorflow as tf
 
+from modules.embedding import Embedding
 
-class TransducerPredictor(tf.keras.layers.Layer):
+
+class TransducerPredictor(tf.keras.Model):
     def __init__(
         self,
         num_classes: int,
         num_layers: int,
         dim_model: int,
         embed_dim: int,
+        dropout: int,
         random_state_sampling: bool,
         name="transducer_predictor",
         **kwargs,
     ):
         """
+
+        Note: TFLite does not support stateful LSTM as of 2021/3/6
+        https://www.tensorflow.org/lite/convert/rnn
+
+        Args:
+            random_state_sampling: RSS proves to improve model accuracy when seen
+            out of domain data (https://arxiv.org/pdf/2005.03271v1.pdf)
 
         TODO: tensorflow_addons's LSTMLayerNorm is too slow. putting layernorm layer
             after lstm layer substantially increases speed and accuracy. Why?
@@ -24,7 +34,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
         self.dim_model = dim_model
         self.random_state_sampling = random_state_sampling
 
-        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim, mask_zero=True)
+        self.embed = Embedding(num_classes, embed_dim)
 
         self.rnns = []
         for i in range(num_layers):
@@ -34,8 +44,8 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 return_state=True,
                 name=f"{name}_lstm_{i}",
             )
-            ln = tf.keras.layers.LayerNormalization(name=f"{name}_ln_{i}")
-            self.rnns.append({"rnn": rnn, "ln": ln})
+            do = tf.keras.layers.Dropout(dropout)
+            self.rnns.append({"rnn": rnn, "dropout": do})
 
     def get_initial_state(self, batch_size: int, training: bool = False):
         """
@@ -46,37 +56,29 @@ class TransducerPredictor(tf.keras.layers.Layer):
             [N, 2, B, D]
 
         """
-        states = tf.TensorArray(
-            size=self.num_layers, dtype=self.dtype, clear_after_read=True
-        )
+        # returning tf.TensorArray().stack() does not work for tensorflow 2.3
+        # during build
+        states = []
+
+        if "2.3" in tf.__version__:
+            dtype = self.dtype
+        elif "2.4" in tf.__version__:
+            dtype = self.compute_dtype
 
         if self.random_state_sampling and training:
             for idx in range(self.num_layers):
-                h = tf.random.normal(
-                    (batch_size, self.dim_model),
-                    dtype=self.dtype,
-                )
-                c = tf.random.normal(
-                    (batch_size, self.dim_model),
-                    dtype=self.dtype,
-                )
+                h = tf.random.normal((batch_size, self.dim_model), dtype=dtype)
+                c = tf.random.normal((batch_size, self.dim_model), dtype=dtype)
                 state = tf.stack([h, c], axis=0)
-                states = states.write(idx, state)
-
+                states.append(state)
         else:
             for idx in range(self.num_layers):
-                h = tf.zeros(
-                    (batch_size, self.dim_model),
-                    dtype=self.dtype,
-                )
-                c = tf.zeros(
-                    (batch_size, self.dim_model),
-                    dtype=self.dtype,
-                )
+                h = tf.zeros((batch_size, self.dim_model), dtype=dtype)
+                c = tf.zeros((batch_size, self.dim_model), dtype=dtype)
                 state = tf.stack([h, c], axis=0)
-                states = states.write(idx, state)
+                states.append(state)
 
-        return states.stack()
+        return tf.stack(states, axis=0)
 
     def call(self, targets, target_lens, training=False):
         """
@@ -99,7 +101,7 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 mask=mask,
                 initial_state=tf.unstack(states[idx], axis=0),
             )
-            x = rnn["ln"](x, training=training)
+            x = rnn["dropout"](x, training=training)
 
         return x
 
@@ -107,14 +109,14 @@ class TransducerPredictor(tf.keras.layers.Layer):
         """Stream function for prediction network
 
         Args:
-            x (tf.Tensor): shape [1, 1]
+            x (tf.Tensor): shape [B, 1]
             states (tf.Tensor): shape [num_lstms, 2, B, P]
 
         Returns:
-            tf.Tensor: outputs with shape [1, 1, P]
-            tf.Tensor: new states with shape [num_lstms, 2, 1, P]
+            tf.Tensor: outputs with shape [B, 1, P]
+            tf.Tensor: new states with shape [num_lstms, 2, B, P]
         """
-        x = self.embed(x, training=False)
+        x = self.embed(x, training=False)  # [B, 1, D_emb]
 
         new_states = []
         for idx, rnn in enumerate(self.rnns):
@@ -122,6 +124,5 @@ class TransducerPredictor(tf.keras.layers.Layer):
                 x, training=False, initial_state=tf.unstack(states[idx], axis=0)
             )
             new_states.append(tf.stack([h, c]))
-            x = rnn["ln"](x, training=False)
 
         return x, tf.stack(new_states, axis=0)
