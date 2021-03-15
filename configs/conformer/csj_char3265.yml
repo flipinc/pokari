@@ -1,0 +1,95 @@
+base_model:
+  _target_: models.transducer.Transducer
+
+trainer:
+  devices: [0]
+  run_eagerly: false
+  batch_size: 2
+  epochs: 100
+  workers: 4
+  max_queue_size: 10
+  use_multiprocessing: false
+  log_interval: 500
+  # model_path: 
+  checkpoint:
+    filepath: outputs/tensorflow/checkpoints/conformer_{epoch:02d}_char3265.h5
+    save_best_only: true
+    save_weights_only: false
+    save_freq: 2000
+    monitor: loss
+  tensorboard:
+    log_dir: outputs/tensorflow/logs/conformer_csj_char_3265/
+    histogram_freq: 1
+    write_graph: true
+    write_images: true
+    update_freq: 50
+    profile_batch: 0
+  debugging: false
+
+spec_augment:
+  freq_masks: 2
+  time_masks: 2
+  freq_width: 15
+  time_width: 25
+
+train_ds:
+  stage: train
+  data_paths:
+    - /workspace/datasets/csj_train.tsv
+  shuffle: true
+  cache: false
+  buffer_size: 100
+  drop_remainder: false
+  num_print_sample_data: 1
+
+validation_ds:
+  stage: val
+  data_paths:
+    - /workspace/datasets/csj_val.tsv
+  shuffle: false
+  cache: true
+  buffer_size: 100
+  drop_remainder: false
+
+audio_feature:
+  sample_rate: 16000
+  window_size: 0.02
+  window_stride: 0.01
+  n_mels: &n_mels 80
+  preemph: 0.97
+  dither: 1e-5
+  pad_to: 16
+
+text_feature:
+  _target_: frontends.text_featurizer.CharFeaturizer
+  vocab_path: /workspace/datasets/jp_3265.char
+  blank_at_zero: true
+  normalize: false # important
+
+optimizer:
+  name: adam
+  learning_rate: 0.001
+  beta_1: 0.9
+  beta_2: 0.999
+ 
+  lr_scheduler:
+    _target_: optimizers.lr_scheduler.WarmupCosineAnnealing
+    warmup_steps: 40000
+    warmup_learning_rate: 1e-6
+    hold_base_ratio: 0.6
+
+encoder:
+  _target_: modules.conformer_encoder.ConformerEncoder
+
+predictor:
+  _target_: modules.transducer_predictor.TransducerPredictor
+  num_layers: 1
+  embed_dim: 320
+  dim_model: 512
+  dropout: 0.1
+  random_state_sampling: true
+
+joint:
+  _target_: modules.transducer_joint.TransducerJoint
+  dim_model: 1024
+  activation: tanh

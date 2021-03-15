@@ -1,4 +1,5 @@
 import math
+from typing import Callable, Union
 
 import numpy as np
 import tensorflow as tf
@@ -6,18 +7,36 @@ import tensorflow as tf
 from modules.subsample import StackSubsample, VggSubsample
 
 
-class EmformerEncoder(tf.keras.layers.Layer):
+class EmformerEncoder(tf.keras.Model):
+    """
+
+    Some training tips for emformer
+
+    - (Only confirmed in PyTorch) to keep positional information, vgg
+    subsampling is preferred over stack subsampling
+
+    - Sometimes training fails and transducer only outputs something general and
+    nonsense eg) `the and`, `a the man`. If this happens, the first thing you
+    should do is check for bugs, since outputing general tokens mean predictor is
+    more trained than encoder and the second thing is to tweak optimizer config,
+    especially warmup rate.
+
+    - For subword models, it takes more time than charcter models to predict
+    non-general words.
+
+    """
+
     def __init__(
         self,
-        feat_in: int,
         num_layers: int,
         num_heads: int,
         dim_model: int,
         dim_ffn: int,
         dropout_attn: int,
+        dropout_ffn: int,
         subsampling: str,
         subsampling_factor: int,
-        subsampling_dim: int,  # conv channels. used for vgg susampling
+        subsampling_dim: int,
         left_length: int,
         chunk_length: int,
         right_length: int,
@@ -48,106 +67,31 @@ class EmformerEncoder(tf.keras.layers.Layer):
         elif self.subsampling == "vgg":
             self.subsample = VggSubsample(
                 subsampling_factor=self.subsampling_factor,
-                feat_in=feat_out,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
-                activation=tf.nn.relu,
                 name=f"{self.name}_vgg_subsample",
             )
 
-        self.layers = []
+        self.blocks = []
         for i in range(self.num_layers):
-            layer = EmformerBlock(
+            block = EmformerBlock(
                 num_heads=self.num_heads,
                 dim_model=self.dim_model,
                 dim_ffn=dim_ffn,
                 dropout_attn=dropout_attn,
+                dropout_ffn=dropout_ffn,
                 left_length=self.left_length,
                 chunk_length=self.chunk_length,
                 right_length=self.right_length,
                 name=f"{self.name}_{i}_block",
             )
-            self.layers.append(layer)
+            self.blocks.append(block)
 
-    def punch_out_ones(
-        self,
-        bs,
-        height,
-        width,
-        top,
-        bottom,
-        left,
-        right,
-    ):
-        """Punch out (fill in ones) from size [Batch, height, width] mask
-
-        Args:
-            bs: batch size
-            height: height of mask
-            width: width of mask
-            top: begining of y index which must be filled in as one
-            bottom: end of y index which must be filled in as one
-            left: begining of x index which must be filled in as one
-            right: end of x index which must be filled in as one
-        Returns:
-            tf.int32: punched out mask
-
-        TODO: there is another way to implement this. Instead of scatter_nd,
-        sandwitch zero-tensor on one-tensor.
-
+    def create_mask(self, audio_lens: np.array, t_max: int):
         """
-        row_indices = tf.TensorArray(tf.int32, size=right - left, clear_after_read=True)
-        counter = tf.constant(0, tf.int32)
-        for i in tf.range(left, right):
-            row_indices = row_indices.write(counter, tf.expand_dims(i, axis=0))
-            counter += tf.constant(1, tf.int32)
-        row_indices = row_indices.stack()
-
-        value = tf.ones([right - left], tf.int32)
-
-        row = tf.scatter_nd(row_indices, value, [width])
-        row = tf.expand_dims(row, axis=0)  # [1, width]
-
-        belt = tf.tile(row, [bottom - top, 1])  # [bottom - top, width]
-
-        col_indices = tf.TensorArray(tf.int32, size=bottom - top, clear_after_read=True)
-        counter = tf.constant(0, tf.int32)
-        for i in tf.range(top, bottom):
-            col_indices = col_indices.write(counter, tf.expand_dims(i, axis=0))
-            counter += tf.constant(1, tf.int32)
-        col_indices = col_indices.stack()
-
-        target = tf.scatter_nd(col_indices, belt, [height, width])
-        target = tf.expand_dims(target, axis=0)  # [1, height, width]
-
-        targets = tf.tile(target, [bs, 1, 1])
-
-        return targets
-
-    def pad_mask(self, vertical_min, vertical_max, horizontal_min, horizontal_max):
-        """Pad emformer mask
-        For efficienct, mask is divided into three areas as follows:
-
-        0 0 0 0 1 1
-        0 0 0 0 1 1
-        0 0 0 0 1 1
-        2 2 2 2 2 2
-        2 2 2 2 2 2
-
-        Each number represents different mask.
-        """
-        mask_top_left = tf.ones([vertical_min, horizontal_min], tf.int32)
-        mask_top_right = tf.zeros(
-            [vertical_min, horizontal_max - horizontal_min], tf.int32
-        )
-        mask_bottom = tf.zeros([vertical_max - vertical_min, horizontal_max], tf.int32)
-        mask_pad_mask = tf.concat([mask_top_left, mask_top_right], axis=1)
-        mask_pad_mask = tf.concat([mask_pad_mask, mask_bottom], axis=0)
-
-        return mask_pad_mask
-
-    def create_mask(self, audio_lens: tf.int32, t_max: tf.int32):
-        """Tensorflow implementation of emformer attention mask
+        Numpy implementatino of emformer attention mask. Only used during training.
+        In graph mode this is as fast as numpy impl. But using this in eager mode
+        is not recommended.
 
         There are four types of masks.
         - mask_body: A attention mask for every timestep.
@@ -157,190 +101,14 @@ class EmformerEncoder(tf.keras.layers.Layer):
         - mark_diagnal: A attention mask for hard copied right contexts
             with copied right contexts.
 
-        Note: Only used during training.
+        Note: If you want to see Tensorflow impl, see commit hash
+        a45040e9e6726d48e7d5e50be88a2bd9da65fb0f
 
         Args:
             audio_lens (tf.Tensor): [B]
             t_max (int): this cannot be inferred by audio_lens because longest input_len
                 may be padded for efficiency
         """
-        bs = tf.shape(audio_lens)[0]
-        num_chunks = tf.cast(tf.math.ceil(t_max / self.chunk_length), tf.int32)
-
-        # TODO: this is allocating more than what is actually required
-        upperbound_right_length = (num_chunks - 1) * self.right_length
-
-        mask_body = tf.zeros([bs, t_max, t_max], tf.int32)
-        mask_left = tf.zeros([bs, t_max, upperbound_right_length], tf.int32)
-        mask_diagnal = tf.zeros(
-            [bs, upperbound_right_length, upperbound_right_length], tf.int32
-        )
-        mask_right = tf.zeros([bs, upperbound_right_length, t_max], tf.int32)
-
-        right_indexes = tf.TensorArray(
-            tf.int32, size=0, dynamic_size=True, clear_after_read=True
-        )
-        for i in tf.range(num_chunks):
-            # 1. mark diagnal and left chunks
-            left_offset = (
-                self.chunk_length * i - self.left_length
-                if (self.chunk_length * i - self.left_length) >= 0
-                else 0
-            )
-            start_offset = self.chunk_length * i
-            end_offset = (
-                self.chunk_length * (i + 1)
-                if self.chunk_length * (i + 1) <= t_max
-                else t_max
-            )
-
-            mask_body += self.punch_out_ones(
-                bs,
-                width=t_max,
-                height=t_max,
-                left=left_offset,
-                right=end_offset,
-                top=start_offset,
-                bottom=end_offset,
-            )
-
-            # last segment does not have right context
-            if i == (num_chunks - 1):
-                break
-
-            # 2. hard copy right contexts
-            remaining_space = t_max - (end_offset + self.right_length)
-            if remaining_space >= 0:
-                this_right_length = self.right_length
-            else:
-                this_right_length = t_max - end_offset
-
-            mask_left += self.punch_out_ones(
-                bs,
-                height=t_max,
-                width=upperbound_right_length,
-                top=start_offset,
-                bottom=start_offset + self.chunk_length,
-                left=right_indexes.size(),
-                right=right_indexes.size() + this_right_length,
-            )
-
-            mask_diagnal += self.punch_out_ones(
-                bs,
-                height=upperbound_right_length,
-                width=upperbound_right_length,
-                top=right_indexes.size(),
-                bottom=right_indexes.size() + this_right_length,
-                left=right_indexes.size(),
-                right=right_indexes.size() + this_right_length,
-            )
-
-            mask_right += self.punch_out_ones(
-                bs,
-                height=upperbound_right_length,
-                width=t_max,
-                top=right_indexes.size(),
-                bottom=right_indexes.size() + this_right_length,
-                left=left_offset,
-                right=end_offset,
-            )
-
-            for offset in tf.range(
-                end_offset, end_offset + this_right_length, dtype=tf.int32
-            ):
-                right_indexes = right_indexes.write(right_indexes.size(), offset)
-
-        right_indexes = right_indexes.stack()
-        right_size = tf.shape(right_indexes)[0]
-
-        # 3. remove unused right contexts
-        kept_indicies = tf.range(right_size, dtype=tf.int32)
-        mask_left = tf.gather(mask_left, kept_indicies, axis=2)
-        mask_diagnal = tf.gather(mask_diagnal, kept_indicies, axis=1)
-        mask_diagnal = tf.gather(mask_diagnal, kept_indicies, axis=2)
-        mask_right = tf.gather(mask_right, kept_indicies, axis=1)
-
-        # 4. mask paddings
-        # TODO: there should be a way to parallelize this
-        padded_mask_body = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
-        padded_mask_right = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
-        padded_mask_left = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
-        padded_mask_diagnal = tf.TensorArray(tf.int32, size=bs, clear_after_read=True)
-        for i in tf.range(bs):
-            max_len = audio_lens[i]
-
-            # [None, 1]
-            to_be_padded_right_indicies = tf.where(right_indexes >= max_len)
-            if tf.shape(to_be_padded_right_indicies)[0] > 0:
-                # get raw value
-                pad_begin_index = tf.cast(to_be_padded_right_indicies[0][0], tf.int32)
-            else:
-                # if preprocessing are implemented right, there shouldn't be
-                # audio features that are less than the chunk size.
-                # But for now, temporary value is used for numerical efficiency.
-                # TODO: Does this affect any code?.
-                pad_begin_index = right_size
-
-            # 4.1 pad mask_body
-            mask_body_pad_mask = self.pad_mask(
-                vertical_min=max_len,
-                vertical_max=t_max,
-                horizontal_min=max_len,
-                horizontal_max=t_max,
-            )
-            padded_mask_body = padded_mask_body.write(
-                i, mask_body[i] * mask_body_pad_mask
-            )
-
-            # 4.2 pad mask_right
-            mask_right_pad_mask = self.pad_mask(
-                vertical_min=pad_begin_index,
-                vertical_max=right_size,
-                horizontal_min=max_len,
-                horizontal_max=t_max,
-            )
-            padded_mask_right = padded_mask_right.write(
-                i, mask_right[i] * mask_right_pad_mask
-            )
-
-            # 4.3 pad mask_left
-            mask_left_pad_mask = self.pad_mask(
-                vertical_min=max_len,
-                vertical_max=t_max,
-                horizontal_min=pad_begin_index,
-                horizontal_max=right_size,
-            )
-            padded_mask_left = padded_mask_left.write(
-                i, mask_left[i] * mask_left_pad_mask
-            )
-
-            # 4.4 pad mask_diagnal
-            mask_diagnal_pad_mask = self.pad_mask(
-                vertical_min=pad_begin_index,
-                vertical_max=right_size,
-                horizontal_min=pad_begin_index,
-                horizontal_max=right_size,
-            )
-            padded_mask_diagnal = padded_mask_diagnal.write(
-                i, mask_diagnal[i] * mask_diagnal_pad_mask
-            )
-
-        # 5. stack all masks
-        mask_body = padded_mask_body.stack()
-        mask_right = padded_mask_right.stack()
-        mask_left = padded_mask_left.stack()
-        mask_diagnal = padded_mask_diagnal.stack()
-
-        # 6. concatenate all masks
-        mask_top = tf.concat([mask_diagnal, mask_right], axis=-1)
-        mask_bottom = tf.concat([mask_left, mask_body], axis=-1)
-        mask = tf.concat([mask_top, mask_bottom], axis=-2)
-        mask = tf.expand_dims(mask, axis=1)
-
-        return tf.equal(mask, 0), right_indexes
-
-    def np_create_mask(self, audio_lens: np.array, t_max: int):
-        """Numpy implementatino of emformer attention mask"""
         audio_lens = audio_lens.astype("int32")
 
         bs = audio_lens.shape[0]
@@ -439,7 +207,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         mask = np.concatenate([mask_top, mask_bottom], axis=-2)
         mask = np.expand_dims(mask, axis=1)
 
-        return mask == 0, right_indexes
+        return mask.astype("float32"), right_indexes
 
     def stream(
         self,
@@ -462,39 +230,16 @@ class EmformerEncoder(tf.keras.layers.Layer):
         # 2. subsampling
         x = self.subsample(x)
 
-        # 3. loop over layers while saving cache at the same time
-        new_cache_k = tf.TensorArray(
-            self.dtype,
-            size=len(self.layers),
-            clear_after_read=True,
-            element_shape=tf.TensorShape(
-                (
-                    None,  # batch size
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                )
-            ),
-        )
-        new_cache_v = tf.TensorArray(
-            self.dtype,
-            size=len(self.layers),
-            clear_after_read=True,
-            element_shape=tf.TensorShape(
-                (
-                    None,  # batch size
-                    self.left_length,
-                    self.num_heads,
-                    self.dim_model // self.num_heads,
-                )
-            ),
-        )
-        for i, layer in enumerate(self.layers):
-            x, (temp_cache_k, temp_cache_v) = layer.stream(x, cache[0][i], cache[1][i])
-            new_cache_k = new_cache_k.write(i, temp_cache_k)
-            new_cache_v = new_cache_v.write(i, temp_cache_v)
-        new_cache_k = new_cache_k.stack()
-        new_cache_v = new_cache_v.stack()
+        # 3. loop over blocks while saving cache at the same time
+        new_cache_k = []
+        new_cache_v = []
+        for i, block in enumerate(self.blocks):
+            x, (temp_cache_k, temp_cache_v) = block.stream(x, cache[0][i], cache[1][i])
+            new_cache_k.append(temp_cache_k)
+            new_cache_v.append(temp_cache_v)
+
+        new_cache_k = tf.stack(new_cache_k, axis=0)
+        new_cache_v = tf.stack(new_cache_v, axis=0)
         new_cache = tf.stack([new_cache_k, new_cache_v], axis=0)
 
         # 4. Trim right context
@@ -503,7 +248,7 @@ class EmformerEncoder(tf.keras.layers.Layer):
         return x, new_cache
 
     def get_initial_state(self, batch_size: int):
-        """Get initial state for streaming emformer"""
+        """Get initial state for streaming emformer [2, N, B, L, H, D/H]"""
         return tf.zeros(
             [
                 2,  # cache_k and cache_v
@@ -515,7 +260,9 @@ class EmformerEncoder(tf.keras.layers.Layer):
             ]
         )
 
-    def call(self, audio_features: tf.Tensor, audio_lens: tf.int32):
+    def call(
+        self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = None
+    ):
         """
 
         D_1: number of mels. This number has to match D_2 after frame stacking
@@ -536,16 +283,24 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
         # 3. create attention mask
         t_new = tf.cast(tf.shape(x)[1], tf.int32)
-        mask, right_indexes = self.create_mask(audio_lens, t_new)
+        # using numpy mask instead of tensorflow gives 40%+ training time reduction
+        # and this does not affect training at all
+        mask, right_indexes = tf.numpy_function(
+            self.create_mask, [audio_lens, t_new], [tf.float32, tf.int32]
+        )
+        # need to explicitly set shape for numpy mask, otherwise build() fails
+        mask.set_shape([None, 1, None, None])  # [B, 1, Total_R + Tmax, Total_R + Tmax]
+        if "2.4" in tf.__version__ and mask.dtype != self.compute_dtype:  # for mxp
+            mask = tf.cast(mask, self.compute_dtype)
 
         # 4. Hard copy right context and prepare input for the first iteration
         # [B, Total_R+Tmax, D]
         x_right = tf.gather(x, right_indexes, axis=1)
         x = tf.concat([x_right, x], axis=1)
 
-        # 5. loop over layers.
-        for layer in self.layers:
-            x, _ = layer(x, mask)
+        # 5. loop over blocks.
+        for block in self.blocks:
+            x = block(x, mask=mask, training=training)
 
         # 6. Trim copied right context
         x = x[:, len(right_indexes) :, :]
@@ -554,15 +309,28 @@ class EmformerEncoder(tf.keras.layers.Layer):
 
 
 class EmformerBlock(tf.keras.layers.Layer):
+    """Emformer Block
+    Emformer Blocks are just custom impl of multi-head attention. See
+    https://arxiv.org/pdf/1910.12977.pdf for more detail.
+    Code is referenced from tfa.layers.MultiHeadAttention
+    """
+
     def __init__(
         self,
         num_heads: int,
         dim_model: int,
         dim_ffn: int,
         dropout_attn: int,
+        dropout_ffn: int,
         left_length: int,
         chunk_length: int,
         right_length: int,
+        kernel_initializer: Union[str, Callable] = "glorot_uniform",
+        kernel_regularizer: Union[str, Callable] = None,
+        kernel_constraint: Union[str, Callable] = None,
+        bias_initializer: Union[str, Callable] = "zeros",
+        bias_regularizer: Union[str, Callable] = None,
+        bias_constraint: Union[str, Callable] = None,
         name: str = "emformer_block",
     ):
         super().__init__(name=name)
@@ -571,141 +339,216 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.chunk_length = chunk_length
         self.right_length = right_length
 
-        self.d_k = dim_model // num_heads
+        self.head_size = dim_model // num_heads
         self.num_heads = num_heads
+
+        kernel_initializer = tf.keras.initializers.get(kernel_initializer)
+        kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
+        kernel_constraint = tf.keras.constraints.get(kernel_constraint)
+        bias_initializer = tf.keras.initializers.get(bias_initializer)
+        bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
+        bias_constraint = tf.keras.constraints.get(bias_constraint)
+
+        self.query_kernel = self.add_weight(
+            name=f"{name}_query_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.key_kernel = self.add_weight(
+            name=f"{name}_key_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.value_kernel = self.add_weight(
+            name=f"{name}_value_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.projection_kernel = self.add_weight(
+            name=f"{name}_projection_kernel",
+            shape=[num_heads, self.head_size, dim_model],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.projection_bias = self.add_weight(
+            name=f"{name}_projection_bias",
+            shape=[dim_model],
+            initializer=bias_initializer,
+            regularizer=bias_regularizer,
+            constraint=bias_constraint,
+        )
 
         self.ln_in = tf.keras.layers.LayerNormalization()
         self.ln_out_1 = tf.keras.layers.LayerNormalization()
         self.ln_out_2 = tf.keras.layers.LayerNormalization()
 
-        self.linear_q = tf.keras.layers.Dense(dim_model)
-        self.linear_k = tf.keras.layers.Dense(dim_model)
-        self.linear_v = tf.keras.layers.Dense(dim_model)
-
         self.attn_dropout = tf.keras.layers.Dropout(dropout_attn)
 
-        self.linear_out_1 = tf.keras.layers.Dense(dim_ffn)
+        self.linear_dropout_1 = tf.keras.layers.Dropout(dropout_ffn)
+        self.linear_dropout_2 = tf.keras.layers.Dropout(dropout_ffn)
+
+        self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
 
     def attend(
         self,
-        input: tf.Tensor,
+        x: tf.Tensor,
         q: tf.Tensor,
         k: tf.Tensor,
         v: tf.Tensor,
         mask: tf.Tensor = None,
+        training: bool = None,
     ):
-        bs = tf.shape(q)[0]
+        """
 
-        # 1. get attention scores -> [B, H, Total_R+Tmax, Total_R+Tmax]
-        attn_scores = tf.matmul(q, tf.transpose(k, (0, 1, 3, 2))) / math.sqrt(self.d_k)
+        N: Total_R + Tmax at training time. segment_size at inference time.
+        M: Total_R + Tmax at training time. segment_size + left_size at inference time.
+
+        Args:
+            q: [B, N, H, D]
+            k: [B, M, H, D]
+            v: [B, M, H, D]
+            mask: Only used at training time. [B, 1, M, M]
+
+        """
+        if "2.3" in tf.__version__:
+            dtype = self.dtype
+        elif "2.4" in tf.__version__:
+            dtype = self.compute_dtype
+
+        # 1. get attention scores -> [B, H, N, M]
+        # doing the division to either query or key instead of their product saves
+        # some computation
+        depth = tf.constant(self.head_size, dtype=dtype)  # for mxp
+        q /= tf.sqrt(depth)
+        attn_scores = tf.einsum("...NHO,...MHO->...HNM", q, k)
 
         # 2. apply mask and softmax
         if mask is not None:
-            attn_scores = tf.where(mask, attn_scores, float("-inf"))
+            if dtype == tf.float16:
+                inf_min = tf.float16.min
+                inverse_mask = tf.cast((1.0 - mask), dtype)
+            else:
+                # using float(-inf) or -math.inf gives nan after softmax
+                inf_min = -10e9
+                inverse_mask = 1.0 - mask
+
+            attn_scores += inf_min * inverse_mask
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-            attn_probs = tf.where(mask, attn_probs, 0.0)
+            # TODO: does doing this improve accuracy?
+            attn_probs = attn_probs * mask
         else:
             attn_probs = tf.nn.softmax(attn_scores, axis=-1)
-        attn_probs = self.attn_dropout(attn_probs)
 
-        # 3. attend and add residual
-        output = tf.matmul(attn_probs, v)
-        output = tf.transpose(output, [0, 2, 1, 3])
-        output = tf.reshape(output, (bs, -1, self.num_heads * self.d_k))
-        attn_out = output + input
+        attn_probs = self.attn_dropout(attn_probs, training=training)
 
-        # 4. layer norm
-        output = self.ln_out_1(attn_out)
+        # 3. attention * value
+        output = tf.einsum("...HNM,...MHI->...NHI", attn_probs, v)
 
-        # 5. feed forward and add residual
+        # 4. calculate dot product attention
+        output = tf.einsum("...NHI,HIO->...NO", output, self.projection_kernel)
+        output += self.projection_bias
+
+        attn_out = output + x
+
+        # 5. FFN module in transformer
+        output = self.ln_out_1(attn_out, training=training)
+
         output = self.linear_out_1(output)
-        output = self.linear_out_2(output) + attn_out
+        output = self.linear_dropout_1(output, training=training)
+        output = self.linear_out_2(output)
+        output = self.linear_dropout_2(output, training=training)
 
-        # 6. layer norm
-        output = self.ln_out_2(output)
+        output += attn_out
+
+        output = self.ln_out_2(output, training=training)
 
         return output
 
     def stream(
         self,
-        input: tf.Tensor,
+        inputs: tf.Tensor,
         cache_k: tf.Tensor,
         cache_v: tf.Tensor,
     ):
         """
         Note: At inference time, the notion of Left, Chunk, Right contexts still exists
-            because without them, the compatibility with training will be lost.
-            For example, at training time, the output for t_0, t_1, t_2 is determined
-            by the input of t_0, t_1, t_2 PLUS right contexts.
-            This must be the case for inference too.
+        because without them, the compatibility with training will be lost.
+        For example, at training time, the output for t_0, t_1, t_2 is determined by
+        the input of t_0, t_1, t_2 PLUS right contexts. This must be the case for
+        inference too.
+
+        Note: Only a part of chunk context is cached as next left context. Right context
+        cannot be cached because, at training time, right context at layer n is
+        calculated based on current segment (not previous segment).
 
         N: number of layers
+        S: segment size (chunk size + right size)
+        M: segment size with left context (segment size + left size)
 
         Args:
-            input (tf.Tensor): [B, C+R, D]
-            cache_k (tf.Tensor): [N, B, H, L, D/H]
-            cache_v (tf.Tensor): [N, B, H, L, D/H]
+            x (tf.Tensor): [B, S, D]
+            cache_k (tf.Tensor): [B, L, H, D/H]
+            cache_v (tf.Tensor): [B, L, H, D/H]
         """
-        bs = tf.shape(input)[0]
-
         # 1. apply layer norm
-        input = self.ln_in(input)
+        x = self.ln_in(inputs)
 
-        # 2. calculate q -> [B, H, C+R, D]
-        q = tf.reshape(self.linear_q(input), (bs, -1, self.num_heads, self.d_k))
-        q = tf.transpose(q, (0, 2, 1, 3))
+        # 2. calculate q -> [B, S, H, D]
+        q = tf.einsum("...SI,HIO->...SHO", x, self.query_kernel)
 
-        # 3. calculate k and v -> [B, H, L+C+R, D]
-        k_cr = tf.reshape(self.linear_k(input), (bs, -1, self.num_heads, self.d_k))
-        # we need to include previous cache as left length can extend beyond chunk.
+        # 3. calculate k -> [B, M, H, D]
+        k_cr = tf.einsum("...SI,HIO->...SHO", x, self.key_kernel)
         k = tf.concat([cache_k, k_cr], axis=1)
         new_cache_k = k[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
-        k = tf.transpose(k, (0, 2, 1, 3))
 
-        v_cr = tf.reshape(self.linear_v(input), (bs, -1, self.num_heads, self.d_k))
+        # 4. calculate v -> [B, M, H, D]
+        v_cr = tf.einsum("...SI,HIO->...SHO", x, self.value_kernel)
         v = tf.concat([cache_v, v_cr], axis=1)
         new_cache_v = v[
             :, -(self.left_length + self.right_length) : -self.right_length, :, :
         ]
-        v = tf.transpose(v, (0, 2, 1, 3))
 
-        output = self.attend(input, q, k, v)
+        output = self.attend(inputs, q, k, v, training=False)
 
         return output, (new_cache_k, new_cache_v)
 
     def call(
         self,
-        input: tf.Tensor,
-        mask: tf.Tensor,
+        inputs: tf.Tensor,
+        mask: tf.int32,
+        training: bool = None,
     ):
         """
 
         N: number of chunks
         R: number of right contexts in one chunk
+        T: Total_R + Tmax
 
         Args:
-            input (tf.Tensor): [B, Total_R+Tmax, D]
-            mask (tf.Tensor): [B, 1, Total_R+Tmax, Total_R+Tmax]
+            x (tf.Tensor): [B, T, D]
+            mask (tf.int32): [B, 1, T, T]
 
         Returns:
-            tf.Tensor: [B, Total_R+Tmax, D]
+            tf.Tensor: [B, T, D]
         """
-        bs = tf.shape(input)[0]
-
         # 1. perform layer norm
-        input = self.ln_in(input)
+        x = self.ln_in(inputs)
 
-        # 2. calculate q k,v for all timesteps -> [B, H, Total_R+Tmax, D/H]
-        q = tf.reshape(self.linear_q(input), (bs, -1, self.num_heads, self.d_k))
-        k = tf.reshape(self.linear_k(input), (bs, -1, self.num_heads, self.d_k))
-        v = tf.reshape(self.linear_v(input), (bs, -1, self.num_heads, self.d_k))
-        q = tf.transpose(q, [0, 2, 1, 3])
-        k = tf.transpose(k, [0, 2, 1, 3])
-        v = tf.transpose(v, [0, 2, 1, 3])
+        # 2. calculate q k,v for all timesteps -> [B, T, H, D/H]
+        q = tf.einsum("...TI,HIO->...THO", x, self.query_kernel)
+        k = tf.einsum("...TI,HIO->...THO", x, self.key_kernel)
+        v = tf.einsum("...TI,HIO->...THO", x, self.value_kernel)
 
-        output = self.attend(input, q, k, v, mask)
+        x = self.attend(inputs, q, k, v, mask, training)
 
-        return output, None
+        return x

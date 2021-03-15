@@ -104,6 +104,11 @@ class VggSubsample(nn.Module):
 def stack_subsample(
     audio_signals: torch.Tensor, audio_lens: torch.Tensor, subsampling_factor: int
 ):
+    """
+
+    BUG: shape mismatch
+
+    """
     bs, t_max, idim = audio_signals.shape
     t_new = math.ceil(t_max / subsampling_factor)
     audio_signals = audio_signals.contiguous().view(

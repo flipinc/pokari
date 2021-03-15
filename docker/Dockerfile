@@ -1,24 +1,50 @@
-# as of 2021/2/13, tensorflow/tensorflow:nightly-gpu or :latest-gpu has ome bugs related to RTX 3090 configuration
-FROM nvcr.io/nvidia/tensorflow:20.12-tf2-py3
+# Mainly from https://github.com/TensorSpeech/TensorFlowASR
+FROM nvcr.io/nvidia/tensorflow:21.02-tf2-py3
 
-# install sndfile library
 RUN apt-get update && \
     apt-get -y install \
+    # install sndfile library for librosa
     libportaudio2 \
     libportaudiocpp0 \
     portaudio19-dev \
-    libsndfile1-dev
+    libsndfile1-dev \
+    # install git
+    git \
+    # install cmake
+    cmake protobuf-compiler
 
-WORKDIR /tmp/pokari
-# see https://github.com/psf/black/issues/1707. tensorflow official docker image works fine
-RUN pip uninstall -y typing
+# install aws cli
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install
+
+# install warprnnt. Using fork version of warp-transducer as the original
+# version does not support tf 2.4 + CUDA 11 + compute_86 (RTX 3090)
+# the author of discusses some problems here (https://github.com/TensorSpeech/TensorFlowASR/issues/54)
+RUN git clone https://github.com/Thumb-Technologies/warp-transducer.git && \
+    # set env flags
+    export CUDA_HOME="/usr/local/cuda" && \
+    # see https://github.com/baidu-research/warp-ctc/issues/119
+    export TF_CXX11_ABI=1 && \
+    # build warprnnt
+    cd warp-transducer && \
+    mkdir build && \
+    cd build && \
+    rm -f CMakeCache.txt && \
+    cmake \
+    -DUSE_NAIVE_KERNEL=on \
+    -DCMAKE_C_COMPILER_LAUNCHER=$(which gcc) \
+    -DCMAKE_CXX_COMPILER_LAUNCHER=$(which g++) \
+    -DCUDA_TOOLKIT_ROOT_DIR=$CUDA_HOME .. && \
+    make && \
+    # install tensorflow binding
+    cd ../tensorflow_binding && \
+    CUDA=$CUDA_HOME python3 setup.py install && \
+    rm -rf ../tests test ../pytorch_binding
+
 # install pokari dependencies
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-
-# see https://github.com/tensorflow/tensorflow/issues/43947
-RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcusolver.so.11 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcusolver.so.10
-RUN ln -s /usr/local/cuda-11.1/targets/x86_64-linux/lib/libcupti.so.11.1 $(python -c "import tensorflow.python as x; print(x.__path__[0])")/libcupti.so.11.0
 
 WORKDIR /workspace/pokari
 COPY . .
