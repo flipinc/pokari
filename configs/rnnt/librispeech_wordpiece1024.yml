@@ -109,4 +109,4 @@ joint:
 
 tflite:
   model_path_from: outputs/tensorflow/checkpoints/rnnt_char.h5
-  model_path_to: tflites/rnnt_char.tflite
+  model_path_to: outputs/tflite/rnnt_char.tflite

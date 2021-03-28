@@ -116,4 +116,4 @@ joint:
 
 tflite:
   model_path_from: outputs/tensorflow/checkpoints/emformer_01_char_mini_tt_vgg.h5
-  model_path_to: tflites/emformer_char_mini_vgg.tflite
+  model_path_to: outputs/tflite/emformer_char_mini_vgg.tflite

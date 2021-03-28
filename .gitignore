@@ -9,7 +9,6 @@ __pycache__
 
 # tensorflow related
 outputs
-tflites
 
 # sphinx related
 docs/_build/doctrees
