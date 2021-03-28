@@ -117,4 +117,4 @@ joint:
 
 tflite:
   model_path_from: outputs/tensorflow/checkpoints/emformer_01_subword.h5
-  model_path_to: tflites/emformer_wordpiece_1024_mini_vgg.tflite
+  model_path_to: outputs/tflite/emformer_wordpiece_1024_mini_vgg.tflite

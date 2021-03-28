@@ -277,11 +277,15 @@ class Transducer(BaseModel):
 
         return transcripts, prev_tokens, cache_encoder_states, cache_predictor_states
 
-    def make_one_tflite_function(self):
+    def make_one_tflite_function(self, signal_length: int = None):
+        """
+        Args:
+            signal_length: Keeping it None just works fine.
+        """
         return tf.function(
             self.stream_one_tflite,
             input_signature=[
-                tf.TensorSpec([None], dtype=tf.float32),
+                tf.TensorSpec([signal_length], dtype=tf.float32),
                 tf.TensorSpec([], dtype=tf.int32),
                 tf.TensorSpec(
                     self.encoder.get_initial_state(batch_size=1).get_shape(),
@@ -294,11 +298,11 @@ class Transducer(BaseModel):
             ],
         )
 
-    def make_batch_tflite_function(self, batch_size: int):
+    def make_batch_tflite_function(self, batch_size: int, signal_length: int = None):
         return tf.function(
             self.stream_batch_tflite,
             input_signature=[
-                tf.TensorSpec([batch_size, None], dtype=tf.float32),
+                tf.TensorSpec([batch_size, signal_length], dtype=tf.float32),
                 tf.TensorSpec([batch_size, 1], dtype=tf.int32),
                 tf.TensorSpec(
                     self.encoder.get_initial_state(batch_size=batch_size).get_shape(),
