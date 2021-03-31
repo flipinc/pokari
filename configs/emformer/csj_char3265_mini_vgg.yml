@@ -116,4 +116,8 @@ joint:
 
 tflite:
   model_path_from: outputs/tensorflow/checkpoints/emformer_01_char3265_mini_vgg.h5
-  model_path_to: outputs/tflite/emformer_char3265_mini_vgg.tflite
+  # single
+  # model_path_to: outputs/tflite/emformer_char3265_mini_vgg.tflite
+  # batch
+  batch_size: 2
+  model_path_to: outputs/tflite/emformer_char3265_mini_vgg_batch.tflite

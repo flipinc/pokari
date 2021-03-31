@@ -261,19 +261,7 @@ class Transducer(BaseModel):
             cache_states=cache_predictor_states,  # size depends on encoder type
         )
 
-        transcripts = tf.TensorArray(
-            tf.int32,
-            size=tf.shape(predictions)[0],  # bs
-            element_shape=tf.TensorShape([None]),  # max_length
-        )
-        ct = tf.constant(0, tf.int32)
-        max_length = tf.shape(predictions)[1]
-        for pred in predictions:
-            transcript = self.text_featurizer.indices2upoints(pred)  # [None]
-            transcript = tf.pad(transcript, [[0, max_length - tf.shape(transcript)[0]]])
-            transcripts = transcripts.write(ct, transcript)
-            ct += 1
-        transcripts = transcripts.stack()
+        transcripts = self.text_featurizer.indices2upointsBatch(predictions)
 
         return transcripts, prev_tokens, cache_encoder_states, cache_predictor_states
 
