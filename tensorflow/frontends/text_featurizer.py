@@ -90,14 +90,14 @@ class TextFeaturizer(metaclass=abc.ABCMeta):
 
     @abc.abstractclassmethod
     def indices2upoints(self, indices):
-        """Transforms predicted indices to unicode code points (for using tflite)
+        """Transforms predicted indices to unicode code points
 
         Args:
-            indices (tf.Tensor): indices in shape [None] or [B, None]
+            indices (tf.Tensor): indices in shape [None].
 
         Returns:
             (tf.Tensor): unicode code points transcript with dtype tf.int32 and shape
-            [None] or [B, None]
+            [None]
 
         """
         raise NotImplementedError()
@@ -180,6 +180,26 @@ class CharFeaturizer(TextFeaturizer):
         indices = self.normalize_indices(indices)
         upoints = tf.gather_nd(self.upoints, tf.expand_dims(indices, axis=-1))
         return tf.gather_nd(upoints, tf.where(tf.not_equal(upoints, 0)))
+
+    @tf.function(input_signature=[tf.TensorSpec([None, None], dtype=tf.int32)])
+    def indices2upointsBatch(self, indices: tf.Tensor) -> tf.Tensor:
+        """Transforms predicted indices to unicode code points in batch
+
+        Note: Unlike `indices2upoints`, to keep batch dimension, this function does
+        not remove blank tokens.
+
+        L: length of predicted tokens
+
+        Args:
+            indices: [B, L]
+
+        """
+        indices = self.normalize_indices(indices)
+        # [B, L, 1]
+        upoints = tf.gather_nd(self.upoints, tf.expand_dims(indices, axis=-1))
+        # [B, L]
+        upoints = tf.squeeze(upoints, axis=-1)
+        return upoints
 
 
 class WordpieceFeaturizer(TextFeaturizer):

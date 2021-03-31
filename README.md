@@ -23,6 +23,10 @@ Following (un)installations are required after Docker run for tflite conversion:
 pip uninstall warprnnt_tensorflow
 pip install tensorflow==2.3.2 tensorflow-io==0.16 tensorflow-text==2.3
 ```
+To open tensorboard, run
+```shell
+tensorboard --logdir=outputs/tensorflow/logs
+```
 
 ### TFLite Conversion
 - As of 2021/2/17, tensorflow 2.4 does not work well with tflite. If you see errors such as 
@@ -32,16 +36,16 @@ it is highly likely that reverting back tensorflow version might solve some issu
 - tf.string is not supported in TFLite, so all models outputs Unicode instead.
 - Make sure the converter version matches with the runtime version to align operation versions
 
-### Run Demo on Tensorflow
+### Demo
 Two streaming options are provided: 1) Live demo and 2) Mock streaming using a sample audio file.
-1) Live demo
-Since live demo uses OS audio API, first, make sure you are not running on docker container. Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI). Multiprocessing (audio capture & tflite inference) is only supported on Windows. For linux, change to `multiprocessing=False`.
+1) A live demo on tflite
+Since a live demo uses OS audio API, first, make sure you are NOT running on a docker container. Only audio servers that support loopback recording are able to run locally (ie. Linux/Pulseaudio, Windows/WASAPI).
 ```shell
 pip install SoundCard
 pip install --extra-index-url https://google-coral.github.io/py-repo/ tflite_runtime
 python3 tensorflow/transducer_stream_demo.py
 ```
-2) Mock streaming using a sample audio file
+2) Mock streaming using a sample audio file on tensorflow
 As of now, only loading from one of training examples are supported. Will support loading arbitrary file(s) given as args in the future.
 ```shell
 python3 tensorflow/transducer_stream_file.py
