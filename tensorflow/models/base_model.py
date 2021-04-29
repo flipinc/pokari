@@ -161,18 +161,7 @@ class BaseModel(tf.keras.Model):
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
         if self.mxp_enabled:
-            # TFLite conversion does not work for tf version 2.4 and RTX3090 training
-            # does not work for tf version 2.3
-            if "2.3" in tf.__version__:
-                optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
-                    optimizer, "dynamic"
-                )
-            elif "2.4" in tf.__version__:
-                optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
-            else:
-                NotImplementedError(
-                    "Please check if this version is runnable and tflite convertible."
-                )
+            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
 
         return optimizer
 
@@ -199,6 +188,15 @@ class BaseModel(tf.keras.Model):
         for model in self.summarize_lists:
             model.summary(**kwargs)
         super(BaseModel, self).summary(**kwargs)
+
+    def _save(self, **kwargs):
+        """
+
+        TODO: Right now, only h5 models are saved periodically. In order to save a
+        model in SavedModel format, the saved model needs to be loaded once
+
+        """
+        super(BaseModel, self).save(**kwargs)
 
     def train_step(self, batch):
         x, y_true = batch
@@ -229,11 +227,16 @@ class BaseModel(tf.keras.Model):
 
         learning_rate = (
             self.optimizer.lr.value
-            if hasattr(self, "warmup_steps")  # if lr_scheduler is enabled
+            if hasattr(
+                self, "warmup_steps"
+            )  # warm step is set if lr_scheduler is enabled
             else self.optimizer.lr
         )
 
-        tensorboard_logs = {"loss": loss, "lr": learning_rate}
+        tensorboard_logs = {
+            "loss": loss,
+            "lr": learning_rate,
+        }
 
         logs = self.on_step_end(
             labels=y_true["labels"],
