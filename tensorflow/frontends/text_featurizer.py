@@ -7,9 +7,9 @@ from typing import List, Union
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tds
+from utils.character import en, jp
 
 import frontends.wordpiece as wordpiece
-from frontends.character import en, jp
 
 
 def preprocess_paths(paths: Union[List, str]):

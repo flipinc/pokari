@@ -12,7 +12,6 @@ unidecode
 frozendict
 pytest
 inflect
-onnxruntime
 numpy
 editdistance
 tqdm
