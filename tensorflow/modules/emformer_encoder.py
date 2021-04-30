@@ -7,7 +7,7 @@ import tensorflow as tf
 from modules.subsample import StackSubsample, VggSubsample
 
 
-class EmformerEncoder(tf.keras.Model):
+class EmformerEncoder(tf.keras.layers.Layer):
     """
 
     Some training tips for emformer
@@ -41,17 +41,24 @@ class EmformerEncoder(tf.keras.Model):
         chunk_length: int,
         right_length: int,
         name: str = "emformer_encoder",
+        # kwargs are required to avoid errors when loading a model
+        # see https://github.com/titu1994/keras-neural-alu/issues/1
+        **kwargs,
     ):
         super().__init__(name=name)
 
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.dim_model = dim_model
+        self.dim_ffn = dim_ffn
+        self.dropout_attn = dropout_attn
+        self.dropout_ffn = dropout_ffn
         self.subsampling = subsampling
         self.subsampling_factor = subsampling_factor
-        self.num_heads = num_heads
-        self.num_layers = num_layers
+        self.subsampling_dim = subsampling_dim
         self.left_length = left_length
         self.chunk_length = chunk_length
         self.right_length = right_length
-        self.dim_model = dim_model
 
         feat_out = int(dim_model / subsampling_factor)
         if dim_model % subsampling_factor > 0:
@@ -59,14 +66,14 @@ class EmformerEncoder(tf.keras.Model):
 
         self.linear = tf.keras.layers.Dense(feat_out)
 
-        if self.subsampling == "stack":
+        if subsampling == "stack":
             self.subsample = StackSubsample(
-                subsampling_factor=self.subsampling_factor,
+                subsampling_factor=subsampling_factor,
                 name=f"{self.name}_stack_subsample",
             )
-        elif self.subsampling == "vgg":
+        elif subsampling == "vgg":
             self.subsample = VggSubsample(
-                subsampling_factor=self.subsampling_factor,
+                subsampling_factor=subsampling_factor,
                 feat_out=dim_model,
                 conv_channels=subsampling_dim,
                 name=f"{self.name}_vgg_subsample",
@@ -86,6 +93,28 @@ class EmformerEncoder(tf.keras.Model):
                 name=f"{self.name}_{i}_block",
             )
             self.blocks.append(block)
+
+    def get_config(self):
+        conf = super(EmformerEncoder, self).get_config()
+
+        conf.update(
+            {
+                "num_layers": self.num_layers,
+                "num_heads": self.num_heads,
+                "dim_model": self.dim_model,
+                "dim_ffn": self.dim_ffn,
+                "dropout_attn": self.dropout_attn,
+                "dropout_ffn": self.dropout_ffn,
+                "subsampling": self.subsampling,
+                "subsampling_factor": self.subsampling_factor,
+                "subsampling_dim": self.subsampling_dim,
+                "left_length": self.left_length,
+                "chunk_length": self.chunk_length,
+                "right_length": self.right_length,
+            }
+        )
+
+        return conf
 
     def create_mask(self, audio_lens: np.array, t_max: int):
         """
@@ -260,6 +289,8 @@ class EmformerEncoder(tf.keras.Model):
             ]
         )
 
+    # this is needed to enable autograph during save() and avoid errors
+    @tf.function
     def call(
         self, audio_features: tf.Tensor, audio_lens: tf.int32, training: bool = None
     ):
@@ -332,58 +363,27 @@ class EmformerBlock(tf.keras.layers.Layer):
         bias_regularizer: Union[str, Callable] = None,
         bias_constraint: Union[str, Callable] = None,
         name: str = "emformer_block",
+        **kwargs,
     ):
         super().__init__(name=name)
 
+        self.num_heads = num_heads
+        self.dim_model = dim_model
+        self.dim_ffn = dim_ffn
+        self.dropout_attn = dropout_attn
+        self.dropout_ffn = dropout_ffn
         self.left_length = left_length
         self.chunk_length = chunk_length
         self.right_length = right_length
 
         self.head_size = dim_model // num_heads
-        self.num_heads = num_heads
 
-        kernel_initializer = tf.keras.initializers.get(kernel_initializer)
-        kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
-        kernel_constraint = tf.keras.constraints.get(kernel_constraint)
-        bias_initializer = tf.keras.initializers.get(bias_initializer)
-        bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
-        bias_constraint = tf.keras.constraints.get(bias_constraint)
-
-        self.query_kernel = self.add_weight(
-            name=f"{name}_query_kernel",
-            shape=[num_heads, dim_model, self.head_size],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.key_kernel = self.add_weight(
-            name=f"{name}_key_kernel",
-            shape=[num_heads, dim_model, self.head_size],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.value_kernel = self.add_weight(
-            name=f"{name}_value_kernel",
-            shape=[num_heads, dim_model, self.head_size],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.projection_kernel = self.add_weight(
-            name=f"{name}_projection_kernel",
-            shape=[num_heads, self.head_size, dim_model],
-            initializer=kernel_initializer,
-            regularizer=kernel_regularizer,
-            constraint=kernel_constraint,
-        )
-        self.projection_bias = self.add_weight(
-            name=f"{name}_projection_bias",
-            shape=[dim_model],
-            initializer=bias_initializer,
-            regularizer=bias_regularizer,
-            constraint=bias_constraint,
-        )
+        self.kernel_initializer = tf.keras.initializers.get(kernel_initializer)
+        self.kernel_regularizer = tf.keras.regularizers.get(kernel_regularizer)
+        self.kernel_constraint = tf.keras.constraints.get(kernel_constraint)
+        self.bias_initializer = tf.keras.initializers.get(bias_initializer)
+        self.bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
+        self.bias_constraint = tf.keras.constraints.get(bias_constraint)
 
         self.ln_in = tf.keras.layers.LayerNormalization()
         self.ln_out_1 = tf.keras.layers.LayerNormalization()
@@ -396,6 +396,77 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
+
+    def build(self, input_shape):
+        self.query_kernel = self.add_weight(
+            name=f"{self.name}_query_kernel",
+            shape=[self.num_heads, self.dim_model, self.head_size],
+            initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
+            constraint=self.kernel_constraint,
+        )
+        self.key_kernel = self.add_weight(
+            name=f"{self.name}_key_kernel",
+            shape=[self.num_heads, self.dim_model, self.head_size],
+            initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
+            constraint=self.kernel_constraint,
+        )
+        self.value_kernel = self.add_weight(
+            name=f"{self.name}_value_kernel",
+            shape=[self.num_heads, self.dim_model, self.head_size],
+            initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
+            constraint=self.kernel_constraint,
+        )
+        self.projection_kernel = self.add_weight(
+            name=f"{self.name}_projection_kernel",
+            shape=[self.num_heads, self.head_size, self.dim_model],
+            initializer=self.kernel_initializer,
+            regularizer=self.kernel_regularizer,
+            constraint=self.kernel_constraint,
+        )
+        self.projection_bias = self.add_weight(
+            name=f"{self.name}_projection_bias",
+            shape=[self.dim_model],
+            initializer=self.bias_initializer,
+            regularizer=self.bias_regularizer,
+            constraint=self.bias_constraint,
+        )
+
+    def get_config(self):
+        conf = super(EmformerBlock, self).get_config()
+
+        conf.update(
+            {
+                "num_heads": self.num_heads,
+                "dim_model": self.dim_model,
+                "dim_ffn": self.dim_ffn,
+                "dropout_attn": self.dropout_attn,
+                "dropout_ffn": self.dropout_ffn,
+                "left_length": self.left_length,
+                "chunk_length": self.chunk_length,
+                "right_length": self.right_length,
+                "kernel_initializer": tf.keras.initializers.serialize(
+                    self.kernel_initializer
+                ),
+                "kernel_regularizer": tf.keras.regularizers.serialize(
+                    self.kernel_regularizer
+                ),
+                "kernel_constraint": tf.keras.constraints.serialize(
+                    self.kernel_constraint
+                ),
+                "bias_initializer": tf.keras.initializers.serialize(
+                    self.bias_initializer
+                ),
+                "bias_regularizer": tf.keras.regularizers.serialize(
+                    self.bias_regularizer
+                ),
+                "bias_constraint": tf.keras.constraints.serialize(self.bias_constraint),
+            }
+        )
+
+        return conf
 
     def attend(
         self,

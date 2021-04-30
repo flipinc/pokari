@@ -1,9 +1,7 @@
 import tensorflow as tf
 
-from modules.embedding import Embedding
 
-
-class TransducerPredictor(tf.keras.Model):
+class TransducerPredictor(tf.keras.layers.Layer):
     def __init__(
         self,
         num_classes: int,
@@ -30,11 +28,16 @@ class TransducerPredictor(tf.keras.Model):
         """
         super().__init__(name=name, **kwargs)
 
+        self.num_classes = num_classes
         self.num_layers = num_layers
         self.dim_model = dim_model
+        self.embed_dim = embed_dim
+        self.dropout = dropout
         self.random_state_sampling = random_state_sampling
 
-        self.embed = Embedding(num_classes, embed_dim)
+        # TODO: not using tflite anymore. delete this once training succeeds
+        # self.embed = Embedding(num_classes, embed_dim)
+        self.embed = tf.keras.layers.Embedding(num_classes, embed_dim, mask_zero=True)
 
         self.rnns = []
         for i in range(num_layers):
@@ -46,6 +49,22 @@ class TransducerPredictor(tf.keras.Model):
             )
             do = tf.keras.layers.Dropout(dropout)
             self.rnns.append({"rnn": rnn, "dropout": do})
+
+    def get_config(self):
+        conf = super(TransducerPredictor, self).get_config()
+
+        conf.update(
+            {
+                "num_classes": self.num_classes,
+                "num_layers": self.num_layers,
+                "dim_model": self.dim_model,
+                "embed_dim": self.embed_dim,
+                "dropout": self.dropout,
+                "random_state_sampling": self.random_state_sampling,
+            }
+        )
+
+        return conf
 
     def get_initial_state(self, batch_size: int, training: bool = False):
         """

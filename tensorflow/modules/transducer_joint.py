@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-class TransducerJoint(tf.keras.Model):
+class TransducerJoint(tf.keras.layers.Layer):
     """
 
     TODO: Sometimes, encoder/predictor dim is not always equal to linear layer dim in
@@ -21,13 +21,17 @@ class TransducerJoint(tf.keras.Model):
     ):
         super().__init__(name=name, **kwargs)
 
+        self.num_classes = num_classes
+        self.dim_model = dim_model
+        self.activation = activation
+
         activation = activation.lower()
         if activation == "sigmoid":
-            self.activation = tf.keras.activations.sigmoid
+            self.activate = tf.keras.activations.sigmoid
         elif activation == "relu":
-            self.activation = tf.keras.activations.relu
+            self.activate = tf.keras.activations.relu
         elif activation == "tanh":
-            self.activation = tf.keras.activations.tanh
+            self.activate = tf.keras.activations.tanh
         else:
             raise ValueError("Activation must be either 'sigmoid', 'relu' or 'tanh'")
 
@@ -44,6 +48,19 @@ class TransducerJoint(tf.keras.Model):
             num_classes,
             name=f"{name}_joint",
         )
+
+    def get_config(self):
+        conf = super(TransducerJoint, self).get_config()
+
+        conf.update(
+            {
+                "num_classes": self.num_classes,
+                "dim_model": self.dim_model,
+                "activation": self.activation,
+            }
+        )
+
+        return conf
 
     def call(self, inputs, training=False, **kwargs):
         """
@@ -63,7 +80,7 @@ class TransducerJoint(tf.keras.Model):
         g = tf.expand_dims(g, axis=1)  # [B, 1, U, D]
         del predictor_outputs
 
-        joint_inputs = self.activation(f + g)
+        joint_inputs = self.activate(f + g)
         del f, g
 
         joint_outs = self.linear_joint(joint_inputs)

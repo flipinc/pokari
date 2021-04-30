@@ -14,4 +14,4 @@ if __name__ == "__main__":
 
     transducer.load_weights(cfgs.trainer.model_path)
 
-    transducer.stream()
+    transducer.stream_file()

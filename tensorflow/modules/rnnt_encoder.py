@@ -19,6 +19,12 @@ class RNNTEncoder(tf.keras.Model):
         """RNNT Encoder from https://arxiv.org/pdf/1811.06621.pdf"""
         super().__init__(name=name, **kwargs)
 
+        self.reduction_indices = reduction_indices
+        self.reduction_factors = reduction_factors
+        self.num_layers = num_layers
+        self.dim_model = dim_model
+        self.num_units = num_units
+
         reduction_q = queue.Queue()
         for factor in reduction_factors:
             reduction_q.put(factor)
@@ -40,6 +46,21 @@ class RNNTEncoder(tf.keras.Model):
                     name=f"{self.name}_block_{i}",
                 )
             )
+
+    def get_config(self):
+        conf = super(RNNTEncoder, self).get_config()
+
+        conf.update(
+            {
+                "reduction_indices": self.reduction_indices,
+                "reduction_factors": self.reduction_factors,
+                "num_layers": self.num_layers,
+                "dim_model": self.dim_model,
+                "num_units": self.num_units,
+            }
+        )
+
+        return conf
 
     def get_initial_state(self, batch_size: int = None):
         """Get zeros states
@@ -104,12 +125,6 @@ class RNNTEncoder(tf.keras.Model):
 
         return x, tf.stack(new_states, axis=0)
 
-    def get_config(self):
-        conf = self.reshape.get_config()
-        for block in self.blocks:
-            conf.update(block.get_config())
-        return conf
-
 
 class RNNTEncoderBlock(tf.keras.layers.Layer):
     def __init__(
@@ -121,6 +136,10 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         **kwargs,
     ):
         super().__init__(name=name, **kwargs)
+
+        self.reduction_factor = reduction_factor
+        self.dim_model = dim_model
+        self.num_units = num_units
 
         if reduction_factor > 0:
             self.reduction = StackSubsample(
@@ -142,6 +161,19 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
             name=f"{self.name}_projection",
         )
 
+    def get_config(self):
+        conf = super(RNNTEncoderBlock, self).get_config()
+
+        conf.update(
+            {
+                "reduction_factor": self.reduction_factor,
+                "dim_model": self.dim_model,
+                "num_units": self.num_units,
+            }
+        )
+
+        return conf
+
     def call(self, x, training=False, **kwargs):
         if self.reduction is not None:
             x = self.reduction(x)
@@ -157,13 +189,3 @@ class RNNTEncoderBlock(tf.keras.layers.Layer):
         x = self.ln(x, training=False)
         x = self.projection(x, training=False)
         return x, tf.stack([h, c], axis=0)
-
-    def get_config(self):
-        conf = {}
-        if self.reduction is not None:
-            conf.update(self.reduction.get_config())
-        conf.update(self.rnn.get_config())
-        if self.ln is not None:
-            conf.update(self.ln.get_config())
-        conf.update(self.projection.get_config())
-        return conf

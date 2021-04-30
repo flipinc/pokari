@@ -44,6 +44,8 @@ class AudioFeaturizer:
         features = self(tf.convert_to_tensor(signal, dtype=tf.float32))
         return features.numpy()
 
+    # this is needed to enable autograph during save() and avoid errors
+    @tf.function
     def __call__(self, audio_signals, audio_lens):
         """
 
@@ -56,10 +58,9 @@ class AudioFeaturizer:
 
         audio_lens = tf.cast(tf.math.ceil(audio_lens / self.hop_length), tf.int32)
 
-        # TODO: dither is not supported because tflite does not support random.normal
-        # if self.dither > 0:
-        #     # align dtype with x for amp (float16)
-        #     x += self.dither * tf.random.normal(tf.shape(x), dtype=x.dtype)
+        if self.dither > 0:
+            # align dtype with x for amp (float16)
+            x += self.dither * tf.random.normal(tf.shape(x), dtype=x.dtype)
 
         # preemph
         if self.preemph is not None:
