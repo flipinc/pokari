@@ -12,18 +12,13 @@ if __name__ == "__main__":
     initialize(config_path="../configs/emformer", job_name="emformer")
     cfgs = compose(config_name="csj_char3265_mini_stack.yml")
 
-    if "batch_size" in cfgs.serve:
-        batch_size = cfgs.serve.batch_size
-    else:
-        batch_size = 1
-
     transducer = Transducer(
-        cfgs=cfgs, global_batch_size=batch_size, setup_training=False
+        cfgs=cfgs, global_batch_size=cfgs.serve.batch_size, setup_training=False
     )
     transducer._build()
 
     transducer.load_weights(cfgs.serve.model_path_from)
 
-    transducer.save(filepath=cfgs.serve.model_path_to)
+    transducer.save(filepath=cfgs.serve.model_path_to, include_optimizer=False)
 
     print("✨ Done.")

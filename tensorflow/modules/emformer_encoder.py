@@ -385,6 +385,42 @@ class EmformerBlock(tf.keras.layers.Layer):
         self.bias_regularizer = tf.keras.regularizers.get(bias_regularizer)
         self.bias_constraint = tf.keras.constraints.get(bias_constraint)
 
+        self.query_kernel = self.add_weight(
+            name=f"{name}_query_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.key_kernel = self.add_weight(
+            name=f"{name}_key_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.value_kernel = self.add_weight(
+            name=f"{name}_value_kernel",
+            shape=[num_heads, dim_model, self.head_size],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.projection_kernel = self.add_weight(
+            name=f"{name}_projection_kernel",
+            shape=[num_heads, self.head_size, dim_model],
+            initializer=kernel_initializer,
+            regularizer=kernel_regularizer,
+            constraint=kernel_constraint,
+        )
+        self.projection_bias = self.add_weight(
+            name=f"{name}_projection_bias",
+            shape=[dim_model],
+            initializer=bias_initializer,
+            regularizer=bias_regularizer,
+            constraint=bias_constraint,
+        )
+
         self.ln_in = tf.keras.layers.LayerNormalization()
         self.ln_out_1 = tf.keras.layers.LayerNormalization()
         self.ln_out_2 = tf.keras.layers.LayerNormalization()
@@ -396,43 +432,6 @@ class EmformerBlock(tf.keras.layers.Layer):
 
         self.linear_out_1 = tf.keras.layers.Dense(dim_ffn, activation="relu")
         self.linear_out_2 = tf.keras.layers.Dense(dim_model)
-
-    def build(self, input_shape):
-        self.query_kernel = self.add_weight(
-            name=f"{self.name}_query_kernel",
-            shape=[self.num_heads, self.dim_model, self.head_size],
-            initializer=self.kernel_initializer,
-            regularizer=self.kernel_regularizer,
-            constraint=self.kernel_constraint,
-        )
-        self.key_kernel = self.add_weight(
-            name=f"{self.name}_key_kernel",
-            shape=[self.num_heads, self.dim_model, self.head_size],
-            initializer=self.kernel_initializer,
-            regularizer=self.kernel_regularizer,
-            constraint=self.kernel_constraint,
-        )
-        self.value_kernel = self.add_weight(
-            name=f"{self.name}_value_kernel",
-            shape=[self.num_heads, self.dim_model, self.head_size],
-            initializer=self.kernel_initializer,
-            regularizer=self.kernel_regularizer,
-            constraint=self.kernel_constraint,
-        )
-        self.projection_kernel = self.add_weight(
-            name=f"{self.name}_projection_kernel",
-            shape=[self.num_heads, self.head_size, self.dim_model],
-            initializer=self.kernel_initializer,
-            regularizer=self.kernel_regularizer,
-            constraint=self.kernel_constraint,
-        )
-        self.projection_bias = self.add_weight(
-            name=f"{self.name}_projection_bias",
-            shape=[self.dim_model],
-            initializer=self.bias_initializer,
-            regularizer=self.bias_regularizer,
-            constraint=self.bias_constraint,
-        )
 
     def get_config(self):
         conf = super(EmformerBlock, self).get_config()
