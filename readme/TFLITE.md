@@ -4,10 +4,10 @@
 ## Why not TFLite?
 // TODO
 - tensorflow serving (you just upload your model once)
-- increasing engineering (unicode points, unsupported operations by tflite, expertise required)
+- both required great amount of engineering but tflite requires more (unicode points, unsupported operations)
 
 ## Getting Started
-Following (un)installations are required for tflite conversion after starting Tensorflow's Dockerfile:
+Following (un)installations are required for tflite conversion:
 ```shell
 pip uninstall warprnnt_tensorflow
 pip install tensorflow==2.3.2 tensorflow-io==0.16 tensorflow-text==2.3

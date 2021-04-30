@@ -21,9 +21,9 @@ def convert_to_tflite(cfgs: DictConfig):
     transducer.load_weights(cfgs.tflite.model_path_from)
 
     if batch_size > 1:
-        tf_func = transducer.make_batch_tflite_function(cfgs.tflite.batch_size)
+        tf_func = transducer.make_batch_tf_func(cfgs.tflite.batch_size)
     else:
-        tf_func = transducer.make_one_tflite_function()
+        tf_func = transducer.make_one_tf_func()
 
     concrete_func = tf_func.get_concrete_function()
 
