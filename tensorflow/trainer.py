@@ -38,12 +38,10 @@ if __name__ == "__main__":
 
         if "model_path" in cfgs.trainer:
             print(f"Loading from {cfgs.trainer.model_path} ...")
-
-            # h5 format or savedmodel format
             if ".h5" in cfgs.trainer.model_path:
                 model.load_weights(cfgs.trainer.model_path)
             else:
-                model = tf.keras.models.load_model(cfgs.trainer.model_path)
+                raise ValueError("Only h5 files are accepted.")
 
         model._compile()
         model._fit()

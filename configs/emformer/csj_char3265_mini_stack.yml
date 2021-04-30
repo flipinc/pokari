@@ -3,7 +3,10 @@
 base_model:
   _target_: models.transducer.Transducer
 
-savedmodel_path: outputs/tensorflow/savedmodels/emformer_char3265_mini_vgg
+serve:
+  batch_size: 2
+  model_path_from: outputs/tensorflow/checkpoints/emformer_char3265_mini_vgg_epoch01_loss36.24_lr0.00.h5
+  model_path_to: outputs/tensorflow/savedmodels/emformer_char3265_mini_vgg
 
 trainer:
   devices: [0]
@@ -14,12 +17,12 @@ trainer:
   max_queue_size: 10
   use_multiprocessing: false
   log_interval: 1000
-  model_path: outputs/tensorflow/checkpoints/emformer_01_char3265_mini_stack.h5
+  model_path: outputs/tensorflow/checkpoints/emformer_char3265_mini_vgg_epoch01_loss36.24_lr0.00.h5
   checkpoint:
-    filepath: outputs/tensorflow/checkpoints/emformer_char3265_mini_vgg_epoch{epoch:02d}_loss{loss:.2f}_lr{lr:.2f}.h5 
+    filepath: outputs/tensorflow/checkpoints/emformer_char3265_mini_vgg_epoch{epoch:02d}_loss{loss:.2f}_step{step:09d}.h5 
     save_best_only: true
     save_weights_only: false
-    save_freq: 100
+    save_freq: 2000
     monitor: loss
   tensorboard:
     log_dir: outputs/tensorflow/logs/emformer_csj_char3265_mini_stack/

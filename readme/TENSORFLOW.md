@@ -10,6 +10,17 @@ To open tensorboard, run
 tensorboard --logdir=outputs/tensorflow/logs
 ```
 
+## Save in a SavedModel format
+As of 2021/4/30, tensorflow 2.4 gives an ![error](https://github.com/tensorflow/tensorflow/issues/44541). The SavedModel just runs fine but if you want to eliminate the error, following (un)installations are necessary:
+```shell
+pip uninstall warprnnt_tensorflow
+pip install tensorflow==2.3.2 tensorflow-io==0.16 tensorflow-text==2.3
+```
+You can inspect the SavedModel with a following command inside Docker
+```shell
+saved_model_cli show --dir ./outputs/tensorflow/savedmodels/<MODEL_NAME> --all
+```
+
 ## Demo
 As of now, only loading a sample audio file from one of training examples are supported. We will support loading arbitrary file(s) in the future.
 ```shell
@@ -24,3 +35,4 @@ Run `aws configure` and follow its messages.
 ## Limitations
 - CTC training is much slower compared to Transducer trianing which uses warprnnt-tensorflow for loss computation
 - Mixed precision training is not supported yet
+- Can only save keras.Model with `save_traces=True` (all `get_config`s are not used)

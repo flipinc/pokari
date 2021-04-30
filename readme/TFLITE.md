@@ -3,11 +3,11 @@
 
 ## Why not TFLite?
 // TODO
-- tensorflow serving (you just upload your model once)
-- increasing engineering (unicode points, unsupported operations by tflite, expertise required)
+- SavedModel and TFLite are not that diffrent. both required great amount of engineering but tflite requires more (unsupported operations)
+- tensorflow serving (this is the main reason. Scaling instances that's running tflite models is extremely hard whereas tensorflow serving implements batch processing & tflite doesnt run on GPU)
 
 ## Getting Started
-Following (un)installations are required for tflite conversion after starting Tensorflow's Dockerfile:
+Following (un)installations are required for tflite conversion:
 ```shell
 pip uninstall warprnnt_tensorflow
 pip install tensorflow==2.3.2 tensorflow-io==0.16 tensorflow-text==2.3

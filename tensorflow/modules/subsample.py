@@ -14,6 +14,7 @@ class VggSubsample(tf.keras.layers.Layer):
         kernel_regularizer=None,
         bias_regularizer=None,
         name: str = "vgg_subsample",
+        **kwargs,
     ):
         """Causal Vgg subsampling introduced in https://arxiv.org/pdf/1910.12977.pdf
         Args:
@@ -26,12 +27,17 @@ class VggSubsample(tf.keras.layers.Layer):
         """
         super().__init__(name=name)
 
+        self.subsampling_factor = subsampling_factor
+        self.feat_out = feat_out
+        self.conv_channels = conv_channels
+        self.data_format = data_format
+        self.kernel_regularizer = kernel_regularizer
+        self.bias_regularizer = bias_regularizer
+
         self.sampling_num = int(math.log(subsampling_factor, 2))
 
         kernel_size = 3
         self.pool_strides = 2
-
-        self.data_format = data_format
 
         self.layers = []
         for i in range(self.sampling_num):
@@ -77,6 +83,22 @@ class VggSubsample(tf.keras.layers.Layer):
             kernel_regularizer=kernel_regularizer,
             bias_regularizer=bias_regularizer,
         )
+
+    def get_config(self):
+        conf = super(VggSubsample, self).get_config()
+
+        conf.update(
+            {
+                "subsampling_factor": self.subsampling_factor,
+                "feat_out": self.feat_out,
+                "conv_channels": self.conv_channels,
+                "data_format": self.data_format,
+                "kernel_regularizer": self.kernel_regularizer,
+                "bias_regularizer": self.bias_regularizer,
+            }
+        )
+
+        return conf
 
     def calc_length(self, audio_lens: tf.int32):
         return tf.cast(tf.math.ceil(audio_lens / self.pool_strides), tf.int32)
@@ -186,10 +208,23 @@ class ConvSubsample(tf.keras.layers.Layer):
 
 
 class StackSubsample(tf.keras.layers.Layer):
-    def __init__(self, subsampling_factor: int, name: str = "stack_subsample"):
+    def __init__(
+        self, subsampling_factor: int, name: str = "stack_subsample", **kwargs
+    ):
         super().__init__(name=name)
 
         self.subsampling_factor = subsampling_factor
+
+    def get_config(self):
+        conf = super(StackSubsample, self).get_config()
+
+        conf.update(
+            {
+                "subsampling_factor": self.subsampling_factor,
+            }
+        )
+
+        return conf
 
     def call(self, x: tf.Tensor, audio_lens: tf.int32 = None):
         """

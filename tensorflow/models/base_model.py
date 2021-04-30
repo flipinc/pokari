@@ -20,6 +20,8 @@ class BaseModel(tf.keras.Model):
     ):
         super().__init__()
 
+        self.setup_training = setup_training
+
         self.audio_featurizer = AudioFeaturizer(
             **OmegaConf.to_container(cfgs.audio_feature)
         )
@@ -31,8 +33,9 @@ class BaseModel(tf.keras.Model):
 
         # since in tensorflow 2.3 keras.metrics are registered as layers, models that
         # were trained in tensorflow 2.4 cannot be loaded. To avoid issues like this,
-        # it is better to just disable all training logics when they are unused
-        if setup_training:
+        # it is better to just disable all training logics when they are unused.
+        # And also this is useful to remove unnecessary things from the production model
+        if self.setup_training:
             self.step_counter = tf.Variable(0, dtype=tf.int32, trainable=False)
 
             self.wer = ErrorRate(kind="wer")
@@ -161,7 +164,14 @@ class BaseModel(tf.keras.Model):
             raise NotImplementedError(f"{optimizer} is not yet supported.")
 
         if self.mxp_enabled:
-            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+            if "2.3" in tf.__version__:
+                optimizer = tf.keras.mixed_precision.experimental.LossScaleOptimizer(
+                    optimizer, "dynamic"
+                )
+            elif "2.4" in tf.__version__:
+                optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+            else:
+                NotImplementedError("😊 Hello There!!")
 
         return optimizer
 
@@ -185,8 +195,11 @@ class BaseModel(tf.keras.Model):
         super(BaseModel, self).compile(**self.compile_args)
 
     def _summary(self, **kwargs):
-        for model in self.summarize_lists:
-            model.summary(**kwargs)
+        """
+        Summarization can be only done at a tf.keras.Model level because
+        tf.keras.layers.Layer do not support .summary(). You could use
+        tf.keras.Model for the underlying layers, but it will not be serializable.
+        """
         super(BaseModel, self).summary(**kwargs)
 
     def _save(self, **kwargs):
@@ -236,6 +249,9 @@ class BaseModel(tf.keras.Model):
         tensorboard_logs = {
             "loss": loss,
             "lr": learning_rate,
+            # this is useful for replaying training from mid-point using a saved model
+            # and lr_scheduler
+            "step": self.step_counter,
         }
 
         logs = self.on_step_end(
