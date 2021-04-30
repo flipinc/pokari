@@ -280,7 +280,10 @@ class Transducer(BaseModel):
             tf.Tensor: new encoder states. size depends on encoder type
             tf.Tensor: new predictor states with size [N, 2, B, D_p]
         """
-        audio_lens = tf.expand_dims(tf.shape(audio_signals)[1], axis=0)
+        audio_lens = tf.tile(
+            tf.expand_dims(tf.shape(audio_signals)[1], axis=0),
+            [tf.shape(audio_signals)[0]],
+        )  # [B]
         audio_features = self.audio_featurizer.stream(audio_signals, audio_lens)
 
         encoded_outs, cache_encoder_states = self.encoder.stream(

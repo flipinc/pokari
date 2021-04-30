@@ -101,10 +101,8 @@ if __name__ == "__main__":
         prev_token = tf.zeros([], dtype=tf.int32)
         transcript = ""
 
-    encoder_states = transducer.encoder.get_initial_state(batch_size=BATCH_SIZE).numpy()
-    predictor_states = transducer.predictor.get_initial_state(
-        batch_size=BATCH_SIZE
-    ).numpy()
+    encoder_states = transducer.encoder.get_initial_state(batch_size=BATCH_SIZE)
+    predictor_states = transducer.predictor.get_initial_state(batch_size=BATCH_SIZE)
 
     def recognize(signal, prev_token, encoder_states, predictor_states):
         if signal.shape[0] < segment_size:
