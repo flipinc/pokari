@@ -3,8 +3,8 @@
 
 ## Why not TFLite?
 // TODO
-- tensorflow serving (you just upload your model once)
-- both required great amount of engineering but tflite requires more (unicode points, unsupported operations)
+- SavedModel and TFLite are not that diffrent. both required great amount of engineering but tflite requires more (unsupported operations)
+- tensorflow serving (this is the main reason. Scaling instances that's running tflite models is extremely hard whereas tensorflow serving implements batch processing & tflite doesnt run on GPU)
 
 ## Getting Started
 Following (un)installations are required for tflite conversion:
