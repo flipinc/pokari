@@ -1,6 +1,5 @@
 sphinx
 catalyst-sphinx-theme
-pre-commit
 black
 mlflow
 omegaconf
